@@ -28,8 +28,9 @@ creds = ServiceAccountCredentials.from_json_keyfile_name('gcp_key.json', SCOPES)
 client = gspread.authorize(creds)
 sheet = client.open_by_key(SHEET_ID).worksheet('taxonguru')
 
+# 기존 코어브리프 블로그에서 검증된 모델로 적용합니다.
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-3.5-flash')
 
 def generate_blog_post(row):
     prompt = f"""
@@ -65,7 +66,11 @@ for i, row in enumerate(data):
         print(f"✍️ 작성 중: {row['국문/영문명']}")
         
         # AI 글 생성
-        ai_data = generate_blog_post(row)
+        try:
+            ai_data = generate_blog_post(row)
+        except Exception as e:
+            print(f"⚠️ 생성 실패: {e}")
+            continue
         
         # 슬러그 생성
         slug = row.get('슬러그 (Slug)') or slugify(row['국문/영문명'])
