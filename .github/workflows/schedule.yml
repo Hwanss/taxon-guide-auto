@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: '3.9'
       - name: Install dependencies
-        run: pip install gspread oauth2client requests python-slugify openai
+        run: pip install gspread oauth2client requests python-slugify google-generativeai
       - name: Run main.py
         env:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
