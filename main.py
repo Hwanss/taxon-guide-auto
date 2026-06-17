@@ -32,9 +32,10 @@ wiki_params = {
     "titles": TARGET_SPECIES,
     "prop": "pageimages",
     "format": "json",
-    "pithumbsize": "800"
+    "pithumbsize": "800",
+    "redirects": "1" # 검색어 자동 교정(넘겨주기) 기능
 }
-# 위키피디아 서버가 차단하지 않도록 User-Agent(접속자 명함)를 반드시 추가해야 합니다.
+# 위키피디아 서버가 차단하지 않도록 User-Agent(접속자 명함) 추가
 headers = {
     "User-Agent": "TaxonGuru Auto-Blogger/1.0 (contact: admin@taxonguru.com)"
 }
@@ -57,17 +58,16 @@ try:
 except Exception as e:
     print(f"⚠️ 위키미디어 통신 에러 (이미지 없이 계속 진행합니다): {e}")
 
-# --- [Step 2] DALL-E 3 썸네일 이미지 생성 (유쾌함 & 후킹) ---
-print("🎨 DALL-E 3 썸네일 생성 중...")
+# --- [Step 2] DALL-E 썸네일 이미지 생성 (유쾌함 & 후킹) ---
+print("🎨 DALL-E 썸네일 생성 중...")
 dalle_prompt = f"A highly detailed, cinematic, and slightly humorous 3D illustration of a {TARGET_SPECIES}. National Geographic documentary style but with a fun, engaging twist to attract blog readers. High resolution."
 
 dalle_image_url = ""
 try:
     image_response = openai_client.images.generate(
-        model="dall-e-3",
+        model="dall-e-2", # dall-e-3 권한 활성화 대기용 임시 모델 (추후 3으로 변경 가능)
         prompt=dalle_prompt,
         size="1024x1024",
-        quality="standard",
         n=1,
     )
     dalle_image_url = image_response.data[0].url
@@ -77,7 +77,8 @@ except Exception as e:
 
 # --- [Step 3] AI 딥다이브 본문 생성 (다국어 듀얼 포맷) ---
 print("✍️ AI 딥다이브 본문 작성 중...")
-model = genai.GenerativeModel('gemini-pro')
+# 에러 해결 & 필력 업그레이드: 대표님이 성공적으로 사용하신 최신 2.5 Flash 모델 적용!
+model = genai.GenerativeModel('gemini-2.5-flash')
 prompt = f"""
 너는 'TaxonGuru'라는 전문적이고 유쾌한 생물학 블로그의 에디터야.
 타겟 생물: {TARGET_SPECIES}
