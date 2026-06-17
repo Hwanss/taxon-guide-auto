@@ -22,6 +22,11 @@ openai_client = OpenAI(api_key=OPENAI_API_KEY)
 # 테스트용 타겟 생물 (하드코딩)
 TARGET_SPECIES = "Tyrannosaurus rex"
 
+# 워드프레스 및 위키미디어 접속 시 봇 차단을 방지하기 위한 신분증(User-Agent) 설정
+common_headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 TaxonGuru-Auto/1.0"
+}
+
 print(f"🚀 [TaxonGuru] 하이브리드 & 다국어 딥다이브 공장 가동: {TARGET_SPECIES}")
 
 # --- [Step 1] 위키미디어 본문 이미지 추출 (무료 & 팩트) ---
@@ -33,16 +38,12 @@ wiki_params = {
     "prop": "pageimages",
     "format": "json",
     "pithumbsize": "800",
-    "redirects": "1" # 검색어 자동 교정(넘겨주기) 기능
-}
-# 위키피디아 서버가 차단하지 않도록 User-Agent(접속자 명함) 추가
-headers = {
-    "User-Agent": "TaxonGuru Auto-Blogger/1.0 (contact: admin@taxonguru.com)"
+    "redirects": "1"
 }
 
 wiki_image_url = ""
 try:
-    wiki_res = requests.get(wiki_url, params=wiki_params, headers=headers)
+    wiki_res = requests.get(wiki_url, params=wiki_params, headers=common_headers, timeout=10)
     wiki_res.raise_for_status()
     wiki_response = wiki_res.json()
     
@@ -56,7 +57,7 @@ try:
     else:
         print("⚠️ 위키미디어에 해당 생물의 이미지가 없습니다.")
 except Exception as e:
-    print(f"⚠️ 위키미디어 통신 에러 (이미지 없이 계속 진행합니다): {e}")
+    print(f"⚠️ 위키미디어 통신 에러: {e}")
 
 # --- [Step 2] DALL-E 썸네일 이미지 생성 (유쾌함 & 후킹) ---
 print("🎨 DALL-E 썸네일 생성 중...")
@@ -65,9 +66,10 @@ dalle_prompt = f"A highly detailed, cinematic, and slightly humorous 3D illustra
 dalle_image_url = ""
 try:
     image_response = openai_client.images.generate(
-        model="dall-e-2", # dall-e-3 권한 활성화 대기용 임시 모델 (추후 3으로 변경 가능)
+        model="dall-e-3", # 최신 dall-e-3 모델로 복구!
         prompt=dalle_prompt,
         size="1024x1024",
+        quality="standard",
         n=1,
     )
     dalle_image_url = image_response.data[0].url
@@ -77,7 +79,7 @@ except Exception as e:
 
 # --- [Step 3] AI 딥다이브 본문 생성 (다국어 듀얼 포맷) ---
 print("✍️ AI 딥다이브 본문 작성 중...")
-# 에러 해결 & 필력 업그레이드: 대표님이 성공적으로 사용하신 최신 2.5 Flash 모델 적용!
+# 웹소설에서 검증된 최신 2.5 Flash 모델!
 model = genai.GenerativeModel('gemini-2.5-flash')
 prompt = f"""
 너는 'TaxonGuru'라는 전문적이고 유쾌한 생물학 블로그의 에디터야.
@@ -94,8 +96,13 @@ prompt = f"""
 
 문체: 인기 과학 유튜버처럼 찰진 비유와 유머러스한 톤을 섞어줘. HTML 형식으로 작성하되 <body> 태그 없이 내용만 출력해.
 """
-response = model.generate_content(prompt)
-blog_content = response.text
+try:
+    response = model.generate_content(prompt)
+    blog_content = response.text
+    print("✅ 제미나이 딥다이브 본문 작성 성공!")
+except Exception as e:
+    print(f"❌ 제미나이 본문 생성 에러: {e}")
+    blog_content = f"<h2>{TARGET_SPECIES}</h2><p>본문 생성에 실패했습니다.</p>"
 
 # 본문 중간에 위키미디어 팩트 이미지 HTML 삽입
 if wiki_image_url:
@@ -107,22 +114,25 @@ media_id = None
 if dalle_image_url:
     print("🌐 DALL-E 이미지를 워드프레스에 업로드 중...")
     try:
-        img_data = requests.get(dalle_image_url).content
-        media_headers = {
+        img_data = requests.get(dalle_image_url, timeout=15).content
+        media_upload_headers = common_headers.copy()
+        media_upload_headers.update({
             'Content-Type': 'image/jpeg',
             'Content-Disposition': f'attachment; filename="{TARGET_SPECIES.replace(" ", "_")}_thumbnail.jpg"'
-        }
+        })
+        
         media_res = requests.post(
             f"{WP_URL}/media",
-            headers=media_headers,
+            headers=media_upload_headers,
             auth=(WP_USER, WP_APP_PASSWORD),
-            data=img_data
+            data=img_data,
+            timeout=30
         )
         if media_res.status_code == 201:
             media_id = media_res.json().get('id')
             print("✅ 워드프레스 미디어 업로드 성공!")
         else:
-            print(f"⚠️ 워드프레스 미디어 업로드 실패: {media_res.text}")
+            print(f"⚠️ 워드프레스 미디어 업로드 실패: {media_res.status_code} - {media_res.text}")
     except Exception as e:
         print(f"⚠️ 워드프레스 이미지 업로드 에러: {e}")
 
@@ -138,14 +148,23 @@ post_data = {
 if media_id:
     post_data["featured_media"] = media_id
 
-post_res = requests.post(
-    f"{WP_URL}/posts",
-    auth=(WP_USER, WP_APP_PASSWORD),
-    json=post_data
-)
+try:
+    # 워드프레스 전송 시에도 헤더(User-Agent) 추가 및 타임아웃 설정
+    post_res = requests.post(
+        f"{WP_URL}/posts",
+        headers=common_headers,
+        auth=(WP_USER, WP_APP_PASSWORD),
+        json=post_data,
+        timeout=30
+    )
 
-if post_res.status_code == 201:
-    print("✅ 발행 성공! 워드프레스를 확인해보세요.")
-else:
-    print(f"❌ 발행 실패: {post_res.status_code}")
-    print(post_res.text)
+    if post_res.status_code == 201:
+        print("✅ 발행 성공! 워드프레스를 확인해보세요.")
+    else:
+        print(f"❌ 발행 실패: {post_res.status_code}")
+        print(post_res.text)
+except requests.exceptions.ConnectionError:
+    print("❌ 치명적 에러: taxonguru.com 에 접속할 수 없습니다. (Network is unreachable)")
+    print("👉 해결책: 브라우저에서 사이트가 정상적으로 열리는지 확인하시고, 호스팅어(Hostinger) 방화벽 설정이나 플러그인 보안 단계를 잠시 낮춰보세요.")
+except Exception as e:
+    print(f"❌ 워드프레스 통신 중 알 수 없는 에러: {e}")
