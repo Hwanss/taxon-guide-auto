@@ -45,7 +45,7 @@ try:
     creds = Credentials.from_service_account_info(creds_json, scopes=scopes)
     gc = gspread.authorize(creds)
     
-    worksheet = gc.open_by_key(sheet_id).sheet1
+    worksheet = gc.open_by_key(sheet_id).worksheet("taxonguru")
     records = worksheet.get_all_values()
     
     target_row_index = -1
