@@ -31,7 +31,7 @@ common_headers = {
 }
 
 print("="*60)
-print("📊 [TaxonGuru] 8열 구조 생물 도감 매핑 & 블로그 발행 가동")
+print("📊 [TaxonGuru] 사진 분산 배치형 생물 도감 매핑 & 블로그 발행 가동")
 print("="*60)
 
 # =====================================================================
@@ -79,7 +79,7 @@ except Exception as e:
     exit(1)
 
 # =====================================================================
-# 🛠️ [Helper] 카테고리/태그 ID 매핑 자동화
+# 🛠️ [Helper] 테크니컬 ID 변환
 # =====================================================================
 def get_or_create_wp_term(term_name, taxonomy="categories"):
     url = f"{WP_URL}/{taxonomy}"
@@ -112,7 +112,7 @@ try:
 except Exception: pass
 
 # =====================================================================
-# 🎨 [Step 2] DALL-E 생태계 썸네일 생성
+# 🎨 [Step 2] DALL-E 생태계 스펙타클 썸네일 생성
 # =====================================================================
 dalle_image_url = ""
 try:
@@ -124,17 +124,18 @@ try:
 except Exception: pass
 
 # =====================================================================
-# ✍️ [Step 3] 스토리앵글 맞춤형 꿀잼 다큐 본문 작성 (다국어 닉네임 반영)
+# ✍️ [Step 3] 본문 사이사이 강제 사진 배치 다큐 본문 작성
 # =====================================================================
-print("\n[Step 3] 스토리앵글 맞춤형 대본(본문) 작성 중...")
+print("\n[Step 3] 찰진 드립 및 다국어 닉네임 매핑 본문 집필 중...")
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-# 🔥 영문/국문 닉네임을 스마트하게 분리해서 쓰도록 프롬프트 수정
 prompt = f"""
 너는 'TaxonGuru' 블로그의 수석 고생물학자이자 생태계 스토리텔러야. 
-너의 공식 닉네임은 한국어로는 '에디터 택슨구루', 영어로는 'Editor TaxonGuru'야. 
-글 안에서 본인을 소개하거나 마무리 인사를 할 때 [당신의 닉네임] 같은 빈칸 템플릿을 절대 쓰지 마!
-대신 [1부: 한국어 버전]에서는 당당하게 '에디터 택슨구루'라고 인사하고, [2부: Global Readers English Version]에서는 'Editor TaxonGuru'라고 아주 자연스럽게 사용해.
+
+[지정 닉네임 원칙]
+- [1부: 한국어 버전]에서는 무조건 '에디터 택슨구루'라고 본인을 지칭해.
+- [2부: English Version]에서는 무조건 'Editor TaxonGuru'라고 영어로 지칭해.
+- [당신의 닉네임] 같은 빈칸 표기나 템플릿 기호는 절대로 쓰지 마!
 
 [연구 대상 정보]
 - 학명: {SCI_NAME}
@@ -142,13 +143,15 @@ prompt = f"""
 - 분류 트리: {TAXONOMY_TREE}
 - 스토리앵글(글의 핵심 방향): {STORY_ANGLE}
 
-[작성 가이드라인]
-1. 5단 구조(Hook, Scientific Backbone, Deep Anatomy, Evolutionary Context, Verdict & Trivia)를 무조건 갖춰줘.
-2. 지정된 '스토리앵글'에 맞춰 아주 흥미롭고 위트 있는 찰진 썰(대화체 팍팍 섞어서)로 독자들을 몰입시켜줘. 딱딱한 백과사전 톤 절대 금지!
-3. 본문 상단에 분류 트리({TAXONOMY_TREE}) 정보를 표나 깔끔한 리스트로 마크업해줘.
+[작성 가이드라인 - 이미지 강제 분산 배치]
+1. 5단 구조(Hook, Scientific Backbone, Deep Anatomy, Evolutionary Context, Verdict & Trivia)로 작성하되 백과사전 같은 노잼 서술은 사절이야. 찰진 비유와 드립을 가득 넣어줘.
+2. 본문 상단에 분류 트리({TAXONOMY_TREE}) 정보를 표나 깔끔한 리스트로 마크업해줘.
+3. ⚠️ 중요: 아래 이미지 태그 3개를 본론 흐름 사이사이에 정확히 심어줘! 영어 본문 끝에 몰아서 배치하면 안 돼!
+   - `[WIKI_IMAGE_1]` : 한국어 본문 [1부]의 도입부(Hook) 문단이 끝난 바로 직후 자리에 삽입.
+   - `[WIKI_IMAGE_2]` : 한국어 본문 [1부]의 중간 상세 해부(Deep Anatomy) 문단이 끝난 바로 직후 자리에 삽입.
+   - `[WIKI_IMAGE_3]` : 영어 본문 [2부]의 중간 파트 내용이 끝난 자리에 삽입.
 4. 가독성을 위해 [1부: 한국어 버전]을 먼저 끝낸 뒤, [2부: Global Readers English Version] 전체 번역본을 맨 아래에 완벽히 분리해서 작성해. (한 줄씩 번갈아 쓰지 마!)
-5. 본론 중간중간 알맞은 위치에 `[WIKI_IMAGE_1]`, `[WIKI_IMAGE_2]` 위치 태그를 정확히 삽입해줘. 
-6. 순수 HTML 내용물만 출력할 것(```html 기호 절대 금지).
+5. 순수 HTML 내용물만 출력할 것(```html 기호 절대 금지).
 """
 
 try:
@@ -159,6 +162,7 @@ try:
 except Exception:
     blog_content = f"<h2>{COMMON_NAME}</h2><p>본문 작성 중 에러가 발생했습니다.</p>"
 
+# 🧩 이미지 태그 위치에 실제 수집된 사진 꽂아넣기
 if wiki_images:
     for idx, img_url in enumerate(wiki_images[:3]):
         placeholder = f"[WIKI_IMAGE_{idx+1}]"
@@ -168,6 +172,7 @@ if wiki_images:
         else:
             blog_content += "<br>" + image_html
 
+# 미처 처리 안 된 이미지 플레이스홀더 깔끔히 제거
 blog_content = re.sub(r'\[WIKI_IMAGE_\d+\]', '', blog_content)
 
 # =====================================================================
@@ -210,7 +215,7 @@ if tag_ids: post_data["tags"] = tag_ids
 try:
     post_res = requests.post(f"{WP_URL}/posts", headers=common_headers, auth=(WP_USER, WP_APP_PASSWORD), json=post_data, timeout=60)
     if post_res.status_code == 201:
-        print("  🎉 [발행 대성공!] 공식 카테고리에 맞춰 글이 정상 발행되었습니다.")
+        print("  🎉 [발행 대성공!] 사진 분산 배치 및 영문 닉네임이 정상 반영되어 발행되었습니다.")
         worksheet.update_cell(target_row_index, 1, "완료")
         print(f"  📝 구글 시트 {target_row_index}행의 상태를 '완료'로 변경했습니다.")
     else:
