@@ -31,7 +31,7 @@ common_headers = {
 }
 
 print("="*60)
-print("📊 [TaxonGuru] 안전 가드 장착 생물 도감 매핑 & 발행 가동")
+print("📊 [TaxonGuru] 캡션 문구 고급화 버전 발행 가동")
 print("="*60)
 
 # =====================================================================
@@ -160,15 +160,15 @@ try:
     blog_content = re.sub(r'^```(html)?\s*', '', blog_content, flags=re.IGNORECASE)
     blog_content = re.sub(r'```\s*$', '', blog_content).strip()
 except Exception as e:
-    # 🔥 [수정 핵심] 에러가 발생하면 텍스트를 채우지 않고, 즉시 실행을 중단하여 블로그 발행을 원천 차단합니다.
     print(f"❌ 치명적 에러: 제미나이 본문 작성 도중 오류가 발생했습니다: {e}")
     exit(1)
 
-# 🧩 이미지 태그 위치에 실제 수집된 사진 꽂아넣기
+# 🧩 이미지 태그 위치에 실제 수집된 사진 꽂아넣기 (캡션 고급스럽게 수정 완료)
 if wiki_images:
     for idx, img_url in enumerate(wiki_images[:3]):
         placeholder = f"[WIKI_IMAGE_{idx+1}]"
-        image_html = f'<figure style="text-align: center; margin: 30px 0;"><img src="{img_url}" alt="{SCI_NAME} 자료화면" style="max-width: 100%; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.15);"><figcaption style="font-size: 0.85em; color: #666; margin-top: 8px;">🌍 {SCI_NAME} 실제 현장 자료화면</figcaption></figure>'
+        # 🔥 기계적인 '실제 현장 자료화면' 문구를 전문 잡지풍 문구로 변경했습니다.
+        image_html = f'<figure style="text-align: center; margin: 30px 0;"><img src="{img_url}" alt="{SCI_NAME} 관찰 사진" style="max-width: 100%; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.15);"><figcaption style="font-size: 0.85em; color: #666; margin-top: 8px;">📸 위키미디어 제공: 자연 상태의 {COMMON_NAME} 기록 사진</figcaption></figure>'
         if placeholder in blog_content:
             blog_content = blog_content.replace(placeholder, image_html)
         else:
