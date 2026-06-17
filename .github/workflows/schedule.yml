@@ -1,16 +1,14 @@
 name: Daily Blog Auto-Publish
 
 on:
-  workflow_dispatch: # 수동 실행 버튼 유지
+  workflow_dispatch: # 수동 실행 버튼
   schedule:
-    # 한국 시간 기준 매일 오전 9시 15분, 오후 6시 15분에 실행
-    # (다른 블로그가 정각에 실행된다면 15분 늦춰서 충돌 방지)
+    # ⏰ 다른 블로그와 겹치지 않게 한국 시간 기준 매일 오전 9시 15분, 오후 6시 15분에 하루 2번 실행
     - cron: '15 0,9 * * *'
 
 jobs:
-  build:
+  publish-blog:
     runs-on: ubuntu-latest
-
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
@@ -18,19 +16,21 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.10' # 구버전 경고를 없애기 위해 3.10으로 업그레이드
+        python-version: '3.10'
 
+    # 👇 구글 시트를 읽기 위한 gspread와 google-auth 설치 명령을 확실하게 추가했습니다.
     - name: Install dependencies
-      # 여기에 openai 패키지 설치 명령어를 확실하게 추가했습니다!
       run: |
         python -m pip install --upgrade pip
-        pip install requests google-generativeai openai
+        pip install requests openai google-generativeai gspread google-auth
 
-    - name: Run Python script
+    # 👇 main.py가 구글 시트에 안전하게 접근할 수 있도록 열쇠(Secrets)를 완벽히 넘겨줍니다.
+    - name: Run Blog Publisher
       env:
-        # Secrets에 저장해둔 열쇠들을 파이썬이 쓸 수 있게 연결
         WP_USER: ${{ secrets.WP_USER }}
         WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        SHEET_ID: ${{ secrets.SHEET_ID }}
       run: python main.py
