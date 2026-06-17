@@ -8,16 +8,15 @@ import google.generativeai as genai
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# API 및 구글 시트 설정
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
-    print("❌ 에러: GEMINI_API_KEY 환경 변수를 찾을 수 없습니다. YML 설정을 확인하세요.")
+    print("❌ 에러: GEMINI_API_KEY 환경 변수를 찾을 수 없습니다.")
     exit(1)
 
 genai.configure(api_key=GEMINI_API_KEY)
 
 print("="*60)
-print("🧠 [TaxonGuru] 14개(1주일치) 순수 데이터 강제 출력 공장 가동")
+print("🌿 [TaxonGuru] 공식 카테고리 맞춤형 주제 기획 가동 (14개)")
 print("="*60)
 
 try:
@@ -29,28 +28,36 @@ try:
     gc = gspread.authorize(creds)
     worksheet = gc.open_by_key(sheet_id).worksheet("taxonguru")
 except Exception as e:
-    print(f"❌ 구글 시트 연결 실패 (SHEET_ID 또는 CREDENTIALS 오류): {e}")
+    print(f"❌ 구글 시트 연결 실패: {e}")
     exit(1)
 
-# 제미나이에게 주제 기획 요청 (14개로 수정)
 model = genai.GenerativeModel('gemini-2.5-flash')
 prompt = """
-우리 블로그에 새로 추가할 '조회수 폭발할 만한' 신선하고 흥미로운 포스팅 주제를 기획해줘.
+너는 생물 분류학 및 자연과학 전문 블로그 'TaxonGuru'의 수석 디렉터야.
+우리 블로그에 새로 추가할 '조회수 폭발할 만한' 대박 꿀잼 생물(동물, 식물, 고생물, 미생물 등) 주제 14개를 기획해줘.
 
-[기획 조건]
-1. 아래 4가지 카테고리를 활용해, 매일 2개씩 7일 동안 발행할 수 있도록 총 14개의 주제를 만들어줘. 카테고리별로 골고루 배분해.
-   - 카테고리 종류: '기술', '파이썬 업무 자동화', '로봇 & 스마트팩토리', '게임 트렌드'
-2. 제목(주제)은 딱딱하지 않고 인기 유튜브 썸네일처럼 호기심을 자극하며 유머러스하게 지어줘.
-3. 반드시 다른 설명이나 인사말 없이 오직 순수한 JSON 배열 데이터만 반환해야 해.
+[필수 지정 카테고리 리스트]
+다음 4가지 카테고리 안에서만 생물을 선정하고, 골고루 배분해줘. (텍스트 토시 하나 안 틀리게 똑같이 지정해야 해)
+1. 'Botany / 식물학'
+2. 'Evolution Mysteries / 진화의 미스터리'
+3. 'Extreme Survivors / 극한의 생존자'
+4. 'Size Lab / 크기 비교 연구소'
+
+[작성 조건]
+- 국문/영문명은 독자의 호기심을 끄는 매력적인 타이틀로 지어줘.
+- 스토리앵글은 이 생물을 설명할 때 어떤 유머러스한 드립과 반전 썰로 풀어낼지 1~2줄로 요약해줘.
+- 반드시 다른 설명 없이 오직 순수한 JSON 배열 데이터만 반환해줘.
 
 [필수 구조 예시]
 [
   {
-    "상태": "대기",
-    "주제": "제목 문구",
-    "카테고리": "카테고리 이름",
-    "이미지 키워드": "영어 키워드",
-    "슬러그": "영어-슬러그"
+    "학명": "Echiniscus testudo",
+    "국문/영문명": "물곰 (Tardigrade) - 우주에서도 살아남는 불사의 존재",
+    "분류 트리": "Animalia > Tardigrada > Heterotardigrada > Echiniscidae",
+    "카테고리": "Extreme Survivors / 극한의 생존자",
+    "스토리앵글": "총을 쏴도 끓여도 안 죽는 지구 최강 생명체의 하찮고 귀여운 걸음걸이 반전 매력",
+    "슬러그": "tardigrade-extreme-survivor",
+    "태그": "물곰, 타디그레이드, 극한생물, 우주생물"
   }
 ]
 """
@@ -64,22 +71,24 @@ try:
     raw_text = response.text.strip()
     
     new_topics = json.loads(raw_text)
-    print(f"  ✅ 제미나이가 신상 꿀잼 주제 {len(new_topics)}개를 완벽하게 기획했습니다!")
+    print(f"  ✅ 제미나이가 공식 카테고리 기반 주제 {len(new_topics)}개를 기획했습니다!")
     
     rows_to_append = []
     for topic in new_topics:
+        # A~H열까지 총 8열 매핑
         rows_to_append.append([
-            "대기",
-            topic.get("주제", "").strip(),
-            topic.get("카테고리", "").strip(),
-            topic.get("이미지 키워드", "").strip(),
-            topic.get("슬러그", "").strip()
+            "대기",  # A열: 상태
+            topic.get("학명", "").strip(),  # B열: 학명
+            topic.get("국문/영문명", "").strip(),  # C열: 국/영문명
+            topic.get("분류 트리", "").strip(),  # D열: 분류 트리
+            topic.get("카테고리", "").strip(),  # E열: 카테고리
+            topic.get("스토리앵글", "").strip(),  # F열: 스토리 앵글
+            topic.get("슬러그", "").strip(),  # G열: 슬러그
+            topic.get("태그", "").strip()   # H열: 태그
         ])
         
     worksheet.append_rows(rows_to_append)
-    print(f"  📝 구글 시트 [taxonguru] 탭에 새 주제 {len(rows_to_append)}건을 '대기' 상태로 추가 완료했습니다!")
+    print(f"  📝 구글 시트 [taxonguru] 탭에 공식 카테고리 맞춤 주제 14건 추가 완료!")
 
 except Exception as e:
-    print(f"❌ 주제 생성 및 시트 반영 중 에러 발생: {e}")
-    if raw_text:
-        print(f"⚠️ 제미나이가 보낸 원본 텍스트:\n{raw_text}")
+    print(f"❌ 주제 생성 실패: {e}")
