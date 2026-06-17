@@ -22,7 +22,6 @@ jobs:
         python -m pip install --upgrade pip
         pip install gspread google-auth google-generativeai
 
-    # 👇 바로 이 부분이 누락되어서 에러가 났던 것입니다! (env: 열쇠 전달)
     - name: Run Topic Generator
       env:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
