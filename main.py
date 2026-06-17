@@ -62,7 +62,6 @@ try:
         print("✅ '대기' 상태인 주제가 없습니다. 프로세스를 종료합니다.")
         exit(0)
         
-    # 시트 순서 정확히 동기화 (A:상태, B:학명, C:국문/영문명, D:분류트리, E:카테고리, F:스토리앵글, G:슬러그, H:태그)
     SCI_NAME = target_data[1].strip()
     COMMON_NAME = target_data[2].strip() if len(target_data) > 2 else SCI_NAME
     TAXONOMY_TREE = target_data[3].strip() if len(target_data) > 3 else ""
@@ -74,7 +73,6 @@ try:
     TARGET_TAGS = [t.strip() for t in raw_tags.split(",") if t.strip()] if raw_tags else [TARGET_CATEGORY]
 
     print(f"🎯 발행 생물: {SCI_NAME} ({COMMON_NAME})")
-    print(f"💡 지정 카테고리: {TARGET_CATEGORY}")
     
 except Exception as e:
     print(f"❌ 구글 시트 매핑 실패: {e}")
@@ -114,7 +112,7 @@ try:
 except Exception: pass
 
 # =====================================================================
-# 🎨 [Step 2] DALL-E 국형 스펙타클 썸네일 생성
+# 🎨 [Step 2] DALL-E 생태계 썸네일 생성
 # =====================================================================
 dalle_image_url = ""
 try:
@@ -126,12 +124,15 @@ try:
 except Exception: pass
 
 # =====================================================================
-# ✍️ [Step 3] 스토리앵글 맞춤형 꿀잼 다큐 본문 작성
+# ✍️ [Step 3] 스토리앵글 맞춤형 꿀잼 다큐 본문 작성 (닉네임 고정 반영)
 # =====================================================================
 print("\n[Step 3] 스토리앵글 맞춤형 대본(본문) 작성 중...")
 model = genai.GenerativeModel('gemini-2.5-flash')
+
+# 🔥 프롬프트에 닉네임 강제 지시사항 추가!
 prompt = f"""
 너는 'TaxonGuru' 블로그의 수석 고생물학자이자 생태계 스토리텔러야. 
+너의 공식 닉네임은 '에디터 택슨구루'야. 글 안에서 본인을 소개하거나 마무리 인사를 할 때 [당신의 닉네임] 같은 빈칸 템플릿을 절대 쓰지 말고, 당당하게 '에디터 택슨구루'라는 이름을 직접 자연스럽게 사용해!
 
 [연구 대상 정보]
 - 학명: {SCI_NAME}
