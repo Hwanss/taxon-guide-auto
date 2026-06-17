@@ -31,7 +31,7 @@ common_headers = {
 }
 
 print("="*60)
-print("📊 [TaxonGuru] 사진 분산 배치형 생물 도감 매핑 & 블로그 발행 가동")
+print("📊 [TaxonGuru] 안전 가드 장착 생물 도감 매핑 & 발행 가동")
 print("="*60)
 
 # =====================================================================
@@ -126,7 +126,7 @@ except Exception: pass
 # =====================================================================
 # ✍️ [Step 3] 본문 사이사이 강제 사진 배치 다큐 본문 작성
 # =====================================================================
-print("\n[Step 3] 찰진 드립 및 다국어 닉네임 매핑 본문 집필 중...")
+print("\n[Step 3] 스토리앵글 맞춤형 대본(본문) 작성 중...")
 model = genai.GenerativeModel('gemini-2.5-flash')
 
 prompt = f"""
@@ -159,8 +159,10 @@ try:
     blog_content = response.text
     blog_content = re.sub(r'^```(html)?\s*', '', blog_content, flags=re.IGNORECASE)
     blog_content = re.sub(r'```\s*$', '', blog_content).strip()
-except Exception:
-    blog_content = f"<h2>{COMMON_NAME}</h2><p>본문 작성 중 에러가 발생했습니다.</p>"
+except Exception as e:
+    # 🔥 [수정 핵심] 에러가 발생하면 텍스트를 채우지 않고, 즉시 실행을 중단하여 블로그 발행을 원천 차단합니다.
+    print(f"❌ 치명적 에러: 제미나이 본문 작성 도중 오류가 발생했습니다: {e}")
+    exit(1)
 
 # 🧩 이미지 태그 위치에 실제 수집된 사진 꽂아넣기
 if wiki_images:
@@ -215,7 +217,7 @@ if tag_ids: post_data["tags"] = tag_ids
 try:
     post_res = requests.post(f"{WP_URL}/posts", headers=common_headers, auth=(WP_USER, WP_APP_PASSWORD), json=post_data, timeout=60)
     if post_res.status_code == 201:
-        print("  🎉 [발행 대성공!] 사진 분산 배치 및 영문 닉네임이 정상 반영되어 발행되었습니다.")
+        print("  🎉 [발행 대성공!] 사진 분산 배치 및 다국어 닉네임이 정상 반영되어 발행되었습니다.")
         worksheet.update_cell(target_row_index, 1, "완료")
         print(f"  📝 구글 시트 {target_row_index}행의 상태를 '완료'로 변경했습니다.")
     else:
