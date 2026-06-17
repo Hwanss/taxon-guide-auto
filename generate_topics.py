@@ -17,7 +17,7 @@ if not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 
 print("="*60)
-print("🧠 [TaxonGuru] 철벽 방어 신규 주제 기획 공장 가동")
+print("🧠 [TaxonGuru] 100% 순수 데이터 강제 출력 공장 가동")
 print("="*60)
 
 try:
@@ -41,9 +41,9 @@ prompt = """
 1. 아래 4가지 카테고리별로 가장 트렌디하고 자극적인(어그로 잘 끌리는) 주제를 각각 3개씩, 총 12개를 만들어줘.
    - 카테고리 종류: '기술', '파이썬 업무 자동화', '로봇 & 스마트팩토리', '게임 트렌드'
 2. 제목(주제)은 딱딱하지 않고 인기 유튜브 썸네일처럼 호기심을 자극하며 유머러스하게 지어줘.
-3. 출력 형식은 파이썬이 바로 읽을 수 있게 반드시 다른 설명 없이 오직 순수한 JSON 배열 형식으로만 출력해줘.
+3. 반드시 다른 설명이나 인사말 없이 오직 순수한 JSON 배열 데이터만 반환해야 해.
 
-[출력 형식 예시]
+[필수 구조 예시]
 [
   {
     "상태": "대기",
@@ -55,23 +55,32 @@ prompt = """
 ]
 """
 
+raw_text = ""
 try:
-    response = model.generate_content(prompt)
+    # 🔥 [핵심 마법] generation_config를 사용하여 제미나이가 사족을 0%도 섞지 못하게 원천 차단합니다.
+    response = model.generate_content(
+        prompt,
+        generation_config={"response_mime_type": "application/json"}
+    )
     raw_text = response.text.strip()
     
-    # 🔥 [무적의 방어막] 앞뒤에 어떤 문자열이나 마크다운이 붙어도 [ ] 구간만 완벽하게 추출
-    json_match = re.search(r'\[\s*\{.*\}\s*\]', raw_text, re.DOTALL)
-    
-    if json_match:
-        clean_json_text = json_match.group(0)
-    else:
-        # 정규식 실패 시 기존 방식으로 보완
-        clean_json_text = re.sub(r'^```(json)?\s*', '', raw_text, flags=re.IGNORECASE)
-        clean_json_text = re.sub(r'```\s*$', '', clean_json_text).strip()
-    
-    new_topics = json.loads(clean_json_text)
-    print(f"  ✅ 제미나이가 신상 꿀잼 주제 {len(new_topics)}개를 기획했습니다!")
+    new_topics = json.loads(raw_text)
+    print(f"  ✅ 제미나이가 신상 꿀잼 주제 {len(new_topics)}개를 완벽하게 기획했습니다!")
     
     rows_to_append = []
     for topic in new_topics:
-        rows_to_append.append(
+        rows_to_append.append([
+            "대기",
+            topic.get("주제", "").strip(),
+            topic.get("카테고리", "").strip(),
+            topic.get("이미지 키워드", "").strip(),
+            topic.get("슬러그", "").strip()
+        ])
+        
+    worksheet.append_rows(rows_to_append)
+    print(f"  📝 구글 시트에 새 주제 {len(rows_to_append)}건을 '대기' 상태로 추가 완료했습니다!")
+
+except Exception as e:
+    print(f"❌ 주제 생성 및 시트 반영 중 에러 발생: {e}")
+    if raw_text:
+        print(f"⚠️ 제미나이가 보낸 원본 텍스트:\n{raw_text}")
