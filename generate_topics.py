@@ -27,7 +27,7 @@ try:
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
     creds = Credentials.from_service_account_info(creds_json, scopes=scopes)
     gc = gspread.authorize(creds)
-    worksheet = gc.open_by_key(sheet_id).sheet1
+    worksheet = gc.open_by_key(sheet_id).worksheet("taxonguru")
 except Exception as e:
     print(f"❌ 구글 시트 연결 실패 (SHEET_ID 또는 CREDENTIALS 오류): {e}")
     exit(1)
