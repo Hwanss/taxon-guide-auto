@@ -8,7 +8,8 @@ import google.generativeai as genai
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+region_key = "GEMINI_API_KEY"
+GEMINI_API_KEY = os.environ.get(region_key)
 if not GEMINI_API_KEY:
     print("❌ 에러: GEMINI_API_KEY 환경 변수를 찾을 수 없습니다.")
     exit(1)
@@ -16,7 +17,7 @@ if not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 
 print("="*60)
-print("🌿 [TaxonGuru] 중복 방지 공식 카테고리 주제 기획 가동 (14개)")
+print("🌿 [TaxonGuru] 한/영 태그 동시 기획 공장 가동 (14개)")
 print("="*60)
 
 try:
@@ -28,7 +29,7 @@ try:
     gc = gspread.authorize(creds)
     worksheet = gc.open_by_key(sheet_id).worksheet("taxonguru")
     
-    # 🔥 [핵심] 시트의 B열(학명) 데이터를 싹 긁어와 중복 방지 리스트 구축
+    # 시트의 B열(학명) 데이터를 싹 긁어와 중복 방지 리스트 구축
     existing_records = worksheet.get_all_values()
     existing_species = []
     if len(existing_records) > 1:
@@ -57,14 +58,23 @@ prompt = f"""
 3. 'Extreme Survivors / 극한의 생존자'
 4. 'Size Lab / 크기 비교 연구소'
 
-[작성 조건]
+[작성 조건 및 태그 규칙]
 - 국문/영문명은 독자의 호기심을 끄는 매력적인 타이틀로 지어줘.
 - 스토리앵글은 이 생물을 설명할 때 어떤 유머러스한 드립과 반전 썰로 풀어낼지 1~2줄로 요약해줘.
+- 🔥 중요 (태그 생성 규칙): 국내 검색 유입과 글로벌 검색 유입을 모두 잡아야 해. 따라서 "태그" 필드에는 반드시 한국어 핵심 키워드와 영어 핵심 키워드를 반반씩 섞어서 콤마(,)로 구분해 작성해줘.
 - 반드시 다른 설명 없이 오직 순수한 JSON 배열 데이터만 반환해줘.
 
-[필수 구조 예시]
+[필수 구조 예시 - 아래 태그 예시처럼 한글과 영어를 모두 포함할 것]
 [
-  {{"학명": "Echiniscus testudo", "국문/영문명": "물곰 (Tardigrade) - 불사의 존재", "분류 트리": "Animalia > Tardigrada > Heterotardigrada", "카테고리": "Extreme Survivors / 극한의 생존자", "스토리앵글": "총을 쏴도 안 죽는 지구 최강 생명체의 하찮고 귀여운 반전 매력", "슬러그": "tardigrade-extreme-survivor", "태그": "물곰, 극한생물"}}
+  {{
+    "학명": "Echiniscus testudo",
+    "국문/영문명": "물곰 (Tardigrade) - 우주에서도 살아남는 불사의 존재",
+    "분류 트리": "Animalia > Tardigrada > Heterotardigrada > Echiniscidae",
+    "카테고리": "Extreme Survivors / 극한의 생존자",
+    "스토리앵글": "총을 쏴도 끓여도 안 죽는 지구 최강 생명체의 하찮고 귀여운 걸음걸이 반전 매력",
+    "슬러그": "tardigrade-extreme-survivor",
+    "태그": "물곰, 타디그레이드, 극한생물, tardigrade, water-bear, extreme-survivor"
+  }}
 ]
 """
 
@@ -89,11 +99,11 @@ try:
             topic.get("카테고리", "").strip(),  # E열: 카테고리
             topic.get("스토리앵글", "").strip(),  # F열: 스토리 앵글
             topic.get("슬러그", "").strip(),  # G열: 슬러그
-            topic.get("태그", "").strip()   # H열: 태그
+            topic.get("태그", "").strip()   # H열: 태그 (한/영 혼합)
         ])
         
     worksheet.append_rows(rows_to_append)
-    print(f"  📝 구글 시트 [taxonguru] 탭에 공식 맞춤 신규 주제 14건 추가 완료!")
+    print(f"  📝 구글 시트 [taxonguru] 탭에 한/영 태그가 포함된 신규 주제 14건 추가 완료!")
 
 except Exception as e:
     print(f"❌ 주제 생성 실패: {e}")
