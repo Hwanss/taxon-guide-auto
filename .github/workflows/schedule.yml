@@ -1,9 +1,11 @@
 name: Daily Blog Auto-Publish
 
 on:
-  workflow_dispatch: # 수동 실행 (Run workflow) 버튼 활성화
+  workflow_dispatch: # 수동 실행 버튼 유지
   schedule:
-    - cron: '0 0 * * *' # 매일 자정 자동 실행 (필요시 시간 수정 가능)
+    # 한국 시간 기준 매일 오전 9시 15분, 오후 6시 15분에 실행
+    # (다른 블로그가 정각에 실행된다면 15분 늦춰서 충돌 방지)
+    - cron: '15 0,9 * * *'
 
 jobs:
   build:
