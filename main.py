@@ -5,6 +5,11 @@ import warnings
 from openai import OpenAI
 import google.generativeai as genai
 
+# 🔥 [핵심 해결책] 깃허브 서버와 호스팅어 간의 길찾기 에러(Errno 101) 방지
+# 파이썬이 접속할 때 무조건 구형 인터넷 주소(IPv4)만 사용하도록 강제 고정합니다.
+import urllib3.util.connection as urllib3_cn
+urllib3_cn.HAS_IPV6 = False
+
 # 보기 싫은 버전 경고(FutureWarning) 메시지 숨기기
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -66,7 +71,7 @@ dalle_prompt = f"A highly detailed, cinematic, and slightly humorous 3D illustra
 dalle_image_url = ""
 try:
     image_response = openai_client.images.generate(
-        model="dall-e-3", # 최신 dall-e-3 모델로 복구!
+        model="dall-e-3", 
         prompt=dalle_prompt,
         size="1024x1024",
         quality="standard",
@@ -75,11 +80,11 @@ try:
     dalle_image_url = image_response.data[0].url
     print("✅ DALL-E 이미지 생성 성공!")
 except Exception as e:
+    # 계정 권한 동기화 대기 중 에러가 날 수 있으므로 실패해도 넘어갑니다.
     print(f"❌ DALL-E 이미지 생성 실패: {e}")
 
 # --- [Step 3] AI 딥다이브 본문 생성 (다국어 듀얼 포맷) ---
 print("✍️ AI 딥다이브 본문 작성 중...")
-# 웹소설에서 검증된 최신 2.5 Flash 모델!
 model = genai.GenerativeModel('gemini-2.5-flash')
 prompt = f"""
 너는 'TaxonGuru'라는 전문적이고 유쾌한 생물학 블로그의 에디터야.
@@ -149,7 +154,6 @@ if media_id:
     post_data["featured_media"] = media_id
 
 try:
-    # 워드프레스 전송 시에도 헤더(User-Agent) 추가 및 타임아웃 설정
     post_res = requests.post(
         f"{WP_URL}/posts",
         headers=common_headers,
@@ -163,8 +167,5 @@ try:
     else:
         print(f"❌ 발행 실패: {post_res.status_code}")
         print(post_res.text)
-except requests.exceptions.ConnectionError:
-    print("❌ 치명적 에러: taxonguru.com 에 접속할 수 없습니다. (Network is unreachable)")
-    print("👉 해결책: 브라우저에서 사이트가 정상적으로 열리는지 확인하시고, 호스팅어(Hostinger) 방화벽 설정이나 플러그인 보안 단계를 잠시 낮춰보세요.")
 except Exception as e:
     print(f"❌ 워드프레스 통신 중 알 수 없는 에러: {e}")
