@@ -17,7 +17,7 @@ if not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 
 print("="*60)
-print("🧠 [TaxonGuru] 100% 순수 데이터 강제 출력 공장 가동")
+print("🧠 [TaxonGuru] 14개(1주일치) 순수 데이터 강제 출력 공장 가동")
 print("="*60)
 
 try:
@@ -32,13 +32,13 @@ except Exception as e:
     print(f"❌ 구글 시트 연결 실패 (SHEET_ID 또는 CREDENTIALS 오류): {e}")
     exit(1)
 
-# 제미나이에게 주제 기획 요청
+# 제미나이에게 주제 기획 요청 (14개로 수정)
 model = genai.GenerativeModel('gemini-2.5-flash')
 prompt = """
 우리 블로그에 새로 추가할 '조회수 폭발할 만한' 신선하고 흥미로운 포스팅 주제를 기획해줘.
 
 [기획 조건]
-1. 아래 4가지 카테고리별로 가장 트렌디하고 자극적인(어그로 잘 끌리는) 주제를 각각 3개씩, 총 12개를 만들어줘.
+1. 아래 4가지 카테고리를 활용해, 매일 2개씩 7일 동안 발행할 수 있도록 총 14개의 주제를 만들어줘. 카테고리별로 골고루 배분해.
    - 카테고리 종류: '기술', '파이썬 업무 자동화', '로봇 & 스마트팩토리', '게임 트렌드'
 2. 제목(주제)은 딱딱하지 않고 인기 유튜브 썸네일처럼 호기심을 자극하며 유머러스하게 지어줘.
 3. 반드시 다른 설명이나 인사말 없이 오직 순수한 JSON 배열 데이터만 반환해야 해.
@@ -57,7 +57,6 @@ prompt = """
 
 raw_text = ""
 try:
-    # 🔥 [핵심 마법] generation_config를 사용하여 제미나이가 사족을 0%도 섞지 못하게 원천 차단합니다.
     response = model.generate_content(
         prompt,
         generation_config={"response_mime_type": "application/json"}
@@ -78,7 +77,7 @@ try:
         ])
         
     worksheet.append_rows(rows_to_append)
-    print(f"  📝 구글 시트에 새 주제 {len(rows_to_append)}건을 '대기' 상태로 추가 완료했습니다!")
+    print(f"  📝 구글 시트 [taxonguru] 탭에 새 주제 {len(rows_to_append)}건을 '대기' 상태로 추가 완료했습니다!")
 
 except Exception as e:
     print(f"❌ 주제 생성 및 시트 반영 중 에러 발생: {e}")
