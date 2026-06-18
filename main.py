@@ -16,7 +16,7 @@ import urllib3.util.connection as urllib3_cn
 urllib3_cn.HAS_IPV6 = False
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-WP_URL = "https://taxonguru.com/wp-json/wp/v2"
+WP_URL = "[https://taxonguru.com/wp-json/wp/v2](https://taxonguru.com/wp-json/wp/v2)"
 WP_USER = os.environ["WP_USER"]
 WP_APP_PASSWORD = os.environ["WP_APP_PASSWORD"]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
@@ -31,17 +31,17 @@ common_headers = {
 }
 
 print("="*60)
-print("📊 [TaxonGuru] 썸네일 진단 모드 생물 도감 발행 가동")
+print("📊 [TaxonGuru] 안전 가드 장착 생물 도감 매핑 & 발행 가동")
 print("="*60)
 
 # =====================================================================
-# 📋 [Step 0] 구글 시트 매핑
+# 📋 [Step 0] 구글 시트 8열 정밀 매핑
 # =====================================================================
 try:
     creds_json = json.loads(os.environ["GOOGLE_CREDENTIALS"])
     sheet_id = os.environ["SHEET_ID"]
     
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    scopes = ["[https://www.googleapis.com/auth/spreadsheets](https://www.googleapis.com/auth/spreadsheets)"]
     creds = Credentials.from_service_account_info(creds_json, scopes=scopes)
     gc = gspread.authorize(creds)
     
@@ -78,6 +78,9 @@ except Exception as e:
     print(f"❌ 구글 시트 매핑 실패: {e}")
     exit(1)
 
+# =====================================================================
+# 🛠️ [Helper] 테크니컬 ID 변환
+# =====================================================================
 def get_or_create_wp_term(term_name, taxonomy="categories"):
     url = f"{WP_URL}/{taxonomy}"
     time.sleep(3)
@@ -95,7 +98,7 @@ def get_or_create_wp_term(term_name, taxonomy="categories"):
 # =====================================================================
 # 🔍 [Step 1] 위키미디어 이미지 수집
 # =====================================================================
-wiki_url = "https://en.wikipedia.org/w/api.php"
+wiki_url = "[https://en.wikipedia.org/w/api.php](https://en.wikipedia.org/w/api.php)"
 wiki_params = {"action": "query", "titles": SCI_NAME, "generator": "images", "gimlimit": "10", "prop": "imageinfo", "iiprop": "url", "format": "json", "redirects": "1"}
 wiki_images = []
 try:
@@ -109,7 +112,7 @@ try:
 except Exception: pass
 
 # =====================================================================
-# 🎨 [Step 2] DALL-E 생태계 스펙타클 썸네일 생성 (에러 추적 강화)
+# 🎨 [Step 2] DALL-E 생태계 스펙타클 썸네일 생성
 # =====================================================================
 print("\n[Step 2] DALL-E 3 썸네일 이미지 생성 중...")
 dalle_image_url = ""
@@ -122,7 +125,7 @@ try:
     print("  ✅ DALL-E 3 썸네일 이미지 생성 성공!")
 except Exception as e:
     print(f"  ❌ DALL-E 3 통신 실패: {e}")
-    print("  💡 (원인 예상) OpenAI API 키가 잘못되었거나 잔액(Billing)이 부족할 확률이 매우 높습니다.")
+    print("  💡 (원인 예상) OpenAI API 키 오류 또는 잔액 부족")
 
 # =====================================================================
 # ✍️ [Step 3] 본문 사이사이 강제 사진 배치 다큐 본문 작성
@@ -147,19 +150,24 @@ prompt = f"""
 1. 5단 구조(Hook, Scientific Backbone, Deep Anatomy, Evolutionary Context, Verdict & Trivia)로 찰진 비유와 드립을 섞어 작성해.
 2. 본문 상단에 분류 트리({TAXONOMY_TREE}) 정보를 마크업해.
 3. ⚠️ 중요: 이미지 태그 3개를 본론 흐름 사이사이에 정확히 심어! 
-   - `[WIKI_IMAGE_1]` : 한국어 [1부]의 도입부(Hook) 문단 끝.
-   - `[WIKI_IMAGE_2]` : 한국어 [1부]의 중간 상세 해부(Deep Anatomy) 문단 끝.
-   - `[WIKI_IMAGE_3]` : 영어 [2부]의 중간 파트 내용 끝.
+   - [WIKI_IMAGE_1] : 한국어 [1부]의 도입부(Hook) 문단 끝.
+   - [WIKI_IMAGE_2] : 한국어 [1부]의 중간 상세 해부(Deep Anatomy) 문단 끝.
+   - [WIKI_IMAGE_3] : 영어 [2부]의 중간 파트 내용 끝.
 4. [1부: 한국어 버전]을 끝낸 뒤, [2부: Global Readers English Version] 번역본을 맨 아래에 완벽히 분리해.
-5. 순수 HTML 내용물만 출력할 것(```html 기호 절대 금지).
+5. 순수 HTML 내용물만 출력할 것.
 """
 
 try:
     response = model.generate_content(prompt)
     blog_content = response.text
-    blog_content = re.sub(r'^
-```(html)?\s*', '', blog_content, flags=re.IGNORECASE)
-    blog_content = re.sub(r'```\s*$', '', blog_content).strip()
+    
+    # 🔥 복사/붙여넣기 에러를 유발하던 복잡한 정규식 대신, 안전한 replace 방식으로 변경했습니다.
+    blog_content = blog_content.replace("```html\n", "")
+    blog_content = blog_content.replace("```html", "")
+    blog_content = blog_content.replace("```\n", "")
+    blog_content = blog_content.replace("```", "")
+    blog_content = blog_content.strip()
+    
 except Exception as e:
     print(f"❌ 치명적 에러: 제미나이 본문 작성 도중 오류가 발생했습니다: {e}")
     exit(1)
@@ -173,10 +181,12 @@ if wiki_images:
         else:
             blog_content += "<br>" + image_html
 
-blog_content = re.sub(r'\[WIKI_IMAGE_\d+\]', '', blog_content)
+# 남은 찌꺼기 태그 정리
+for i in range(1, 4):
+    blog_content = blog_content.replace(f"[WIKI_IMAGE_{i}]", "")
 
 # =====================================================================
-# 🌐 [Step 4] 워드프레스 미디어 업로드 (에러 추적 강화)
+# 🌐 [Step 4] 워드프레스 미디어 업로드
 # =====================================================================
 media_id = None
 if dalle_image_url:
@@ -184,7 +194,6 @@ if dalle_image_url:
     try:
         img_data = requests.get(dalle_image_url, timeout=30).content
         media_headers = common_headers.copy()
-        # 🔥 DALL-E 기본 확장자인 PNG로 정확히 맞춤
         media_headers.update({'Content-Type': 'image/png', 'Content-Disposition': f'attachment; filename="{SCI_NAME.replace(" ", "_")}.png"'})
         time.sleep(3)
         media_res = requests.post(f"{WP_URL}/media", headers=media_headers, auth=(WP_USER, WP_APP_PASSWORD), data=img_data, timeout=60)
@@ -194,7 +203,6 @@ if dalle_image_url:
             print(f"  ✅ 썸네일 업로드 성공! (Media ID: {media_id})")
         else:
             print(f"  ❌ 썸네일 업로드 거부됨 (응답 코드 {media_res.status_code}): {media_res.text}")
-            print("  💡 (원인 예상) 워드프레스 서버 용량 초과 또는 호스팅어의 보안/업로드 설정 문제일 수 있습니다.")
     except Exception as e: 
         print(f"  ❌ 썸네일 업로드 중 통신 에러: {e}")
 
