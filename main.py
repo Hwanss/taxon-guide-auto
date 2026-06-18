@@ -6,7 +6,7 @@ import re
 import time
 import gspread
 from openai import OpenAI
-from google import genai # 🔥 최신 라이브러리로 변경
+from google import genai 
 
 # =====================================================================
 # 🛡️ [시스템 코어 설정]
@@ -21,7 +21,6 @@ WP_APP_PASSWORD = os.environ["WP_APP_PASSWORD"]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
-# 🔥 API 클라이언트 최신화
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -31,19 +30,17 @@ common_headers = {
 }
 
 print("="*60)
-print("📊 [TaxonGuru] 구글 인증 최신화 생물 도감 매핑 & 발행 가동")
+print("📊 [TaxonGuru] Fail-safe 장착 생물 도감 매핑 & 발행 가동")
 print("="*60)
 
 # =====================================================================
-# 📋 [Step 0] 구글 시트 정밀 매핑 (에러 픽스)
+# 📋 [Step 0] 구글 시트 정밀 매핑
 # =====================================================================
 try:
     creds_json = json.loads(os.environ["GOOGLE_CREDENTIALS"])
     sheet_id = os.environ["SHEET_ID"]
     
-    # 🔥 토큰 충돌을 일으키던 구형 코드를 버리고, gspread 공식 최신 내장 함수 사용
     gc = gspread.service_account_from_dict(creds_json)
-    
     worksheet = gc.open_by_key(sheet_id).worksheet("taxonguru")
     records = worksheet.get_all_values()
     
@@ -108,19 +105,28 @@ try:
 except Exception: pass
 
 # =====================================================================
-# 🎨 [Step 2] DALL-E 생태계 스펙타클 썸네일 생성
+# 🎨 [Step 2] 썸네일 이미지 준비 (DALL-E 3 에러 시 위키 자동 대체)
 # =====================================================================
-print("\n[Step 2] DALL-E 3 썸네일 이미지 생성 중...")
-dalle_image_url = ""
+print("\n[Step 2] 썸네일 대표 이미지 준비 중...")
+thumbnail_url = ""
+is_dalle_success = False
+
 try:
     image_response = openai_client.images.generate(
         model="dall-e-3", prompt=f"A highly detailed, cinematic National Geographic style 3D illustration of {SCI_NAME}. Natural environment, dynamic lighting.",
         size="1024x1024", quality="standard", n=1
     )
-    dalle_image_url = image_response.data[0].url
+    thumbnail_url = image_response.data[0].url
+    is_dalle_success = True
     print("  ✅ DALL-E 3 썸네일 이미지 생성 성공!")
 except Exception as e:
-    print(f"  ❌ DALL-E 3 통신 실패: {e}")
+    print(f"  ❌ DALL-E 3 통신 실패 (서버 딜레이 등)")
+    print("  🔄 [Plan B 자동 가동] 위키미디어 실제 사진으로 썸네일을 대체합니다.")
+    if wiki_images:
+        thumbnail_url = wiki_images[0]
+        print("  ✅ 대체 썸네일(위키미디어) 확보 완료!")
+    else:
+        print("  ⚠️ 대체할 사진이 부족하여 썸네일 없이 진행합니다.")
 
 # =====================================================================
 # ✍️ [Step 3] 본문 사이사이 강제 사진 배치 다큐 본문 작성
@@ -157,19 +163,17 @@ try:
         contents=prompt
     )
     blog_content = response.text
-    
-    blog_content = blog_content.replace("```html\n", "")
-    blog_content = blog_content.replace("```html", "")
-    blog_content = blog_content.replace("```\n", "")
-    blog_content = blog_content.replace("```", "")
-    blog_content = blog_content.strip()
-    
+    blog_content = blog_content.replace("```html\n", "").replace("
+```html", "").replace("```\n", "").replace("```", "").strip()
 except Exception as e:
     print(f"❌ 치명적 에러: 제미나이 본문 작성 도중 오류가 발생했습니다: {e}")
     exit(1)
 
-if wiki_images:
-    for idx, img_url in enumerate(wiki_images[:3]):
+# 썸네일로 사용된 위키 사진이 있다면 본문 중복을 피하기 위해 다음 사진들부터 배치
+body_images = wiki_images[1:] if (not is_dalle_success and wiki_images) else wiki_images
+
+if body_images:
+    for idx, img_url in enumerate(body_images[:3]):
         placeholder = f"[WIKI_IMAGE_{idx+1}]"
         image_html = f'<figure style="text-align: center; margin: 30px 0;"><img src="{img_url}" alt="{SCI_NAME} 관찰 사진" style="max-width: 100%; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.15);"><figcaption style="font-size: 0.85em; color: #666; margin-top: 8px;">📸 위키미디어 제공: 자연 상태의 {COMMON_NAME} 기록 사진</figcaption></figure>'
         if placeholder in blog_content:
@@ -181,15 +185,25 @@ for i in range(1, 4):
     blog_content = blog_content.replace(f"[WIKI_IMAGE_{i}]", "")
 
 # =====================================================================
-# 🌐 [Step 4] 워드프레스 미디어 업로드
+# 🌐 [Step 4] 워드프레스 미디어 업로드 (안전성 강화)
 # =====================================================================
 media_id = None
-if dalle_image_url:
+if thumbnail_url:
     print("\n[Step 4] 워드프레스에 썸네일 업로드 중...")
     try:
-        img_data = requests.get(dalle_image_url, timeout=30).content
+        img_data = requests.get(thumbnail_url, timeout=30).content
+        
+        # 확장자 자동 판별
+        ext = "png" if is_dalle_success else "jpg"
+        if not is_dalle_success:
+            if ".png" in thumbnail_url.lower(): ext = "png"
+            elif ".jpeg" in thumbnail_url.lower(): ext = "jpeg"
+            
         media_headers = common_headers.copy()
-        media_headers.update({'Content-Type': 'image/png', 'Content-Disposition': f'attachment; filename="{SCI_NAME.replace(" ", "_")}.png"'})
+        media_headers.update({
+            'Content-Type': f'image/{ext}', 
+            'Content-Disposition': f'attachment; filename="{TARGET_SLUG}_cover.{ext}"'
+        })
         time.sleep(3)
         media_res = requests.post(f"{WP_URL}/media", headers=media_headers, auth=(WP_USER, WP_APP_PASSWORD), data=img_data, timeout=60)
         
