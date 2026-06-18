@@ -5,9 +5,8 @@ import warnings
 import re
 import time
 import gspread
-from google.oauth2.service_account import Credentials
 from openai import OpenAI
-import google.generativeai as genai
+from google import genai # 🔥 최신 라이브러리로 변경
 
 # =====================================================================
 # 🛡️ [시스템 코어 설정]
@@ -16,13 +15,14 @@ import urllib3.util.connection as urllib3_cn
 urllib3_cn.HAS_IPV6 = False
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-WP_URL = "[https://taxonguru.com/wp-json/wp/v2](https://taxonguru.com/wp-json/wp/v2)"
+WP_URL = "https://taxonguru.com/wp-json/wp/v2"
 WP_USER = os.environ["WP_USER"]
 WP_APP_PASSWORD = os.environ["WP_APP_PASSWORD"]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
-genai.configure(api_key=GEMINI_API_KEY)
+# 🔥 API 클라이언트 최신화
+gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 common_headers = {
@@ -31,19 +31,18 @@ common_headers = {
 }
 
 print("="*60)
-print("📊 [TaxonGuru] 안전 가드 장착 생물 도감 매핑 & 발행 가동")
+print("📊 [TaxonGuru] 구글 인증 최신화 생물 도감 매핑 & 발행 가동")
 print("="*60)
 
 # =====================================================================
-# 📋 [Step 0] 구글 시트 8열 정밀 매핑
+# 📋 [Step 0] 구글 시트 정밀 매핑 (에러 픽스)
 # =====================================================================
 try:
     creds_json = json.loads(os.environ["GOOGLE_CREDENTIALS"])
     sheet_id = os.environ["SHEET_ID"]
     
-    scopes = ["[https://www.googleapis.com/auth/spreadsheets](https://www.googleapis.com/auth/spreadsheets)"]
-    creds = Credentials.from_service_account_info(creds_json, scopes=scopes)
-    gc = gspread.authorize(creds)
+    # 🔥 토큰 충돌을 일으키던 구형 코드를 버리고, gspread 공식 최신 내장 함수 사용
+    gc = gspread.service_account_from_dict(creds_json)
     
     worksheet = gc.open_by_key(sheet_id).worksheet("taxonguru")
     records = worksheet.get_all_values()
@@ -78,9 +77,6 @@ except Exception as e:
     print(f"❌ 구글 시트 매핑 실패: {e}")
     exit(1)
 
-# =====================================================================
-# 🛠️ [Helper] 테크니컬 ID 변환
-# =====================================================================
 def get_or_create_wp_term(term_name, taxonomy="categories"):
     url = f"{WP_URL}/{taxonomy}"
     time.sleep(3)
@@ -98,7 +94,7 @@ def get_or_create_wp_term(term_name, taxonomy="categories"):
 # =====================================================================
 # 🔍 [Step 1] 위키미디어 이미지 수집
 # =====================================================================
-wiki_url = "[https://en.wikipedia.org/w/api.php](https://en.wikipedia.org/w/api.php)"
+wiki_url = "https://en.wikipedia.org/w/api.php"
 wiki_params = {"action": "query", "titles": SCI_NAME, "generator": "images", "gimlimit": "10", "prop": "imageinfo", "iiprop": "url", "format": "json", "redirects": "1"}
 wiki_images = []
 try:
@@ -125,13 +121,11 @@ try:
     print("  ✅ DALL-E 3 썸네일 이미지 생성 성공!")
 except Exception as e:
     print(f"  ❌ DALL-E 3 통신 실패: {e}")
-    print("  💡 (원인 예상) OpenAI API 키 오류 또는 잔액 부족")
 
 # =====================================================================
 # ✍️ [Step 3] 본문 사이사이 강제 사진 배치 다큐 본문 작성
 # =====================================================================
 print("\n[Step 3] 스토리앵글 맞춤형 대본(본문) 작성 중...")
-model = genai.GenerativeModel('gemini-2.5-flash')
 
 prompt = f"""
 너는 'TaxonGuru' 블로그의 수석 고생물학자이자 생태계 스토리텔러야. 
@@ -158,10 +152,12 @@ prompt = f"""
 """
 
 try:
-    response = model.generate_content(prompt)
+    response = gemini_client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=prompt
+    )
     blog_content = response.text
     
-    # 🔥 복사/붙여넣기 에러를 유발하던 복잡한 정규식 대신, 안전한 replace 방식으로 변경했습니다.
     blog_content = blog_content.replace("```html\n", "")
     blog_content = blog_content.replace("```html", "")
     blog_content = blog_content.replace("```\n", "")
@@ -181,7 +177,6 @@ if wiki_images:
         else:
             blog_content += "<br>" + image_html
 
-# 남은 찌꺼기 태그 정리
 for i in range(1, 4):
     blog_content = blog_content.replace(f"[WIKI_IMAGE_{i}]", "")
 
