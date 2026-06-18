@@ -163,8 +163,14 @@ try:
         contents=prompt
     )
     blog_content = response.text
-    blog_content = blog_content.replace("```html\n", "").replace("
-```html", "").replace("```\n", "").replace("```", "").strip()
+    # 복사/붙여넣기 시 끊기지 않도록 여러 줄로 안전하게 분할
+    blog_content = blog_content.replace("```html\n", "")
+    blog_content = blog_content.replace("
+```html", "")
+    blog_content = blog_content.replace("```\n", "")
+    blog_content = blog_content.replace("
+```", "")
+    blog_content = blog_content.strip()
 except Exception as e:
     print(f"❌ 치명적 에러: 제미나이 본문 작성 도중 오류가 발생했습니다: {e}")
     exit(1)
