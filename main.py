@@ -31,11 +31,11 @@ common_headers = {
 }
 
 print("="*60)
-print("📊 [TaxonGuru] 캡션 문구 고급화 버전 발행 가동")
+print("📊 [TaxonGuru] 썸네일 진단 모드 생물 도감 발행 가동")
 print("="*60)
 
 # =====================================================================
-# 📋 [Step 0] 구글 시트 8열 정밀 매핑
+# 📋 [Step 0] 구글 시트 매핑
 # =====================================================================
 try:
     creds_json = json.loads(os.environ["GOOGLE_CREDENTIALS"])
@@ -78,9 +78,6 @@ except Exception as e:
     print(f"❌ 구글 시트 매핑 실패: {e}")
     exit(1)
 
-# =====================================================================
-# 🛠️ [Helper] 테크니컬 ID 변환
-# =====================================================================
 def get_or_create_wp_term(term_name, taxonomy="categories"):
     url = f"{WP_URL}/{taxonomy}"
     time.sleep(3)
@@ -112,8 +109,9 @@ try:
 except Exception: pass
 
 # =====================================================================
-# 🎨 [Step 2] DALL-E 생태계 스펙타클 썸네일 생성
+# 🎨 [Step 2] DALL-E 생태계 스펙타클 썸네일 생성 (에러 추적 강화)
 # =====================================================================
+print("\n[Step 2] DALL-E 3 썸네일 이미지 생성 중...")
 dalle_image_url = ""
 try:
     image_response = openai_client.images.generate(
@@ -121,7 +119,10 @@ try:
         size="1024x1024", quality="standard", n=1
     )
     dalle_image_url = image_response.data[0].url
-except Exception: pass
+    print("  ✅ DALL-E 3 썸네일 이미지 생성 성공!")
+except Exception as e:
+    print(f"  ❌ DALL-E 3 통신 실패: {e}")
+    print("  💡 (원인 예상) OpenAI API 키가 잘못되었거나 잔액(Billing)이 부족할 확률이 매우 높습니다.")
 
 # =====================================================================
 # ✍️ [Step 3] 본문 사이사이 강제 사진 배치 다큐 본문 작성
@@ -135,7 +136,6 @@ prompt = f"""
 [지정 닉네임 원칙]
 - [1부: 한국어 버전]에서는 무조건 '에디터 택슨구루'라고 본인을 지칭해.
 - [2부: English Version]에서는 무조건 'Editor TaxonGuru'라고 영어로 지칭해.
-- [당신의 닉네임] 같은 빈칸 표기나 템플릿 기호는 절대로 쓰지 마!
 
 [연구 대상 정보]
 - 학명: {SCI_NAME}
@@ -143,53 +143,60 @@ prompt = f"""
 - 분류 트리: {TAXONOMY_TREE}
 - 스토리앵글(글의 핵심 방향): {STORY_ANGLE}
 
-[작성 가이드라인 - 이미지 강제 분산 배치]
-1. 5단 구조(Hook, Scientific Backbone, Deep Anatomy, Evolutionary Context, Verdict & Trivia)로 작성하되 백과사전 같은 노잼 서술은 사절이야. 찰진 비유와 드립을 가득 넣어줘.
-2. 본문 상단에 분류 트리({TAXONOMY_TREE}) 정보를 표나 깔끔한 리스트로 마크업해줘.
-3. ⚠️ 중요: 아래 이미지 태그 3개를 본론 흐름 사이사이에 정확히 심어줘! 영어 본문 끝에 몰아서 배치하면 안 돼!
-   - `[WIKI_IMAGE_1]` : 한국어 본문 [1부]의 도입부(Hook) 문단이 끝난 바로 직후 자리에 삽입.
-   - `[WIKI_IMAGE_2]` : 한국어 본문 [1부]의 중간 상세 해부(Deep Anatomy) 문단이 끝난 바로 직후 자리에 삽입.
-   - `[WIKI_IMAGE_3]` : 영어 본문 [2부]의 중간 파트 내용이 끝난 자리에 삽입.
-4. 가독성을 위해 [1부: 한국어 버전]을 먼저 끝낸 뒤, [2부: Global Readers English Version] 전체 번역본을 맨 아래에 완벽히 분리해서 작성해. (한 줄씩 번갈아 쓰지 마!)
+[작성 가이드라인]
+1. 5단 구조(Hook, Scientific Backbone, Deep Anatomy, Evolutionary Context, Verdict & Trivia)로 찰진 비유와 드립을 섞어 작성해.
+2. 본문 상단에 분류 트리({TAXONOMY_TREE}) 정보를 마크업해.
+3. ⚠️ 중요: 이미지 태그 3개를 본론 흐름 사이사이에 정확히 심어! 
+   - `[WIKI_IMAGE_1]` : 한국어 [1부]의 도입부(Hook) 문단 끝.
+   - `[WIKI_IMAGE_2]` : 한국어 [1부]의 중간 상세 해부(Deep Anatomy) 문단 끝.
+   - `[WIKI_IMAGE_3]` : 영어 [2부]의 중간 파트 내용 끝.
+4. [1부: 한국어 버전]을 끝낸 뒤, [2부: Global Readers English Version] 번역본을 맨 아래에 완벽히 분리해.
 5. 순수 HTML 내용물만 출력할 것(```html 기호 절대 금지).
 """
 
 try:
     response = model.generate_content(prompt)
     blog_content = response.text
-    blog_content = re.sub(r'^```(html)?\s*', '', blog_content, flags=re.IGNORECASE)
+    blog_content = re.sub(r'^
+```(html)?\s*', '', blog_content, flags=re.IGNORECASE)
     blog_content = re.sub(r'```\s*$', '', blog_content).strip()
 except Exception as e:
     print(f"❌ 치명적 에러: 제미나이 본문 작성 도중 오류가 발생했습니다: {e}")
     exit(1)
 
-# 🧩 이미지 태그 위치에 실제 수집된 사진 꽂아넣기 (캡션 고급스럽게 수정 완료)
 if wiki_images:
     for idx, img_url in enumerate(wiki_images[:3]):
         placeholder = f"[WIKI_IMAGE_{idx+1}]"
-        # 🔥 기계적인 '실제 현장 자료화면' 문구를 전문 잡지풍 문구로 변경했습니다.
         image_html = f'<figure style="text-align: center; margin: 30px 0;"><img src="{img_url}" alt="{SCI_NAME} 관찰 사진" style="max-width: 100%; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.15);"><figcaption style="font-size: 0.85em; color: #666; margin-top: 8px;">📸 위키미디어 제공: 자연 상태의 {COMMON_NAME} 기록 사진</figcaption></figure>'
         if placeholder in blog_content:
             blog_content = blog_content.replace(placeholder, image_html)
         else:
             blog_content += "<br>" + image_html
 
-# 미처 처리 안 된 이미지 플레이스홀더 깔끔히 제거
 blog_content = re.sub(r'\[WIKI_IMAGE_\d+\]', '', blog_content)
 
 # =====================================================================
-# 🌐 [Step 4] 워드프레스 미디어 업로드 및 카테고리 매핑
+# 🌐 [Step 4] 워드프레스 미디어 업로드 (에러 추적 강화)
 # =====================================================================
 media_id = None
 if dalle_image_url:
+    print("\n[Step 4] 워드프레스에 썸네일 업로드 중...")
     try:
         img_data = requests.get(dalle_image_url, timeout=30).content
         media_headers = common_headers.copy()
-        media_headers.update({'Content-Type': 'image/jpeg', 'Content-Disposition': f'attachment; filename="{SCI_NAME.replace(" ", "_")}.jpg"'})
+        # 🔥 DALL-E 기본 확장자인 PNG로 정확히 맞춤
+        media_headers.update({'Content-Type': 'image/png', 'Content-Disposition': f'attachment; filename="{SCI_NAME.replace(" ", "_")}.png"'})
         time.sleep(3)
         media_res = requests.post(f"{WP_URL}/media", headers=media_headers, auth=(WP_USER, WP_APP_PASSWORD), data=img_data, timeout=60)
-        if media_res.status_code == 201: media_id = media_res.json().get('id')
-    except Exception: pass
+        
+        if media_res.status_code == 201: 
+            media_id = media_res.json().get('id')
+            print(f"  ✅ 썸네일 업로드 성공! (Media ID: {media_id})")
+        else:
+            print(f"  ❌ 썸네일 업로드 거부됨 (응답 코드 {media_res.status_code}): {media_res.text}")
+            print("  💡 (원인 예상) 워드프레스 서버 용량 초과 또는 호스팅어의 보안/업로드 설정 문제일 수 있습니다.")
+    except Exception as e: 
+        print(f"  ❌ 썸네일 업로드 중 통신 에러: {e}")
 
 print("\n[Step 4.5] 지정 카테고리 고유 ID 변환 및 태그 매핑 중...")
 category_id = get_or_create_wp_term(TARGET_CATEGORY, "categories")
@@ -199,7 +206,7 @@ for tag in TARGET_TAGS:
     if t_id: tag_ids.append(t_id)
 
 # =====================================================================
-# 🚀 [Step 5] 최종 포스팅 발행 및 시트 '완료' 처리
+# 🚀 [Step 5] 최종 포스팅 발행
 # =====================================================================
 print("\n[Step 5] 워드프레스 최종 포스팅 발행 중...")
 time.sleep(4)
@@ -217,9 +224,8 @@ if tag_ids: post_data["tags"] = tag_ids
 try:
     post_res = requests.post(f"{WP_URL}/posts", headers=common_headers, auth=(WP_USER, WP_APP_PASSWORD), json=post_data, timeout=60)
     if post_res.status_code == 201:
-        print("  🎉 [발행 대성공!] 사진 분산 배치 및 다국어 닉네임이 정상 반영되어 발행되었습니다.")
+        print("  🎉 [발행 대성공!] 글과 이미지가 정상 발행되었습니다.")
         worksheet.update_cell(target_row_index, 1, "완료")
-        print(f"  📝 구글 시트 {target_row_index}행의 상태를 '완료'로 변경했습니다.")
     else:
         print(f"  ❌ 발행 실패: {post_res.text}")
 except Exception as e:
