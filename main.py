@@ -96,20 +96,43 @@ def get_or_create_wp_term(term_name, taxonomy="categories"):
     return None
 
 # =====================================================================
-# 🔍 [Step 1] 위키미디어 이미지 수집 (공식 봇 헤더 사용)
+# 🔍 [Step 1] 위키미디어 이미지 수집 (스마트 필터링 탑재)
 # =====================================================================
+print("\n[Step 1] 위키미디어 생물 사진 수집 중...")
 wiki_url = "https://en.wikipedia.org/w/api.php"
-wiki_params = {"action": "query", "titles": SCI_NAME, "generator": "images", "gimlimit": "10", "prop": "imageinfo", "iiprop": "url", "format": "json", "redirects": "1"}
 wiki_images = []
+
+# 🚫 거를 찌꺼기 키워드 (지도, 잠수함, 인물, 그래프 등)
+junk_keywords = ["map", "distribution", "locator", "world", "alvin", "sub", "graph", "chart", "logo", "icon", "person", "scientist", "flag"]
+
 try:
-    wiki_res = requests.get(wiki_url, params=wiki_params, headers=wiki_headers, timeout=20)
-    pages = wiki_res.json().get("query", {}).get("pages", {})
+    # 1차 시도: 문서의 대표 사진(Infobox Image) 1장 먼저 무조건 확보
+    main_img_params = {"action": "query", "titles": SCI_NAME, "prop": "pageimages", "pithumbsize": "1000", "format": "json", "redirects": "1"}
+    main_res = requests.get(wiki_url, params=main_img_params, headers=wiki_headers, timeout=20)
+    pages = main_res.json().get("query", {}).get("pages", {})
     for pid, pdata in pages.items():
+        if "thumbnail" in pdata:
+            wiki_images.append(pdata["thumbnail"]["source"])
+            print("  ✅ 위키 문서 대표 생물 사진 확보 완료")
+
+    # 2차 시도: 본문에 들어갈 나머지 사진들 확보 (찌꺼기 필터링 적용)
+    wiki_params = {"action": "query", "titles": SCI_NAME, "generator": "images", "gimlimit": "15", "prop": "imageinfo", "iiprop": "url", "format": "json", "redirects": "1"}
+    wiki_res = requests.get(wiki_url, params=wiki_params, headers=wiki_headers, timeout=20)
+    pages2 = wiki_res.json().get("query", {}).get("pages", {})
+    
+    for pid, pdata in pages2.items():
         if "imageinfo" in pdata:
             img_url = pdata["imageinfo"][0]["url"]
-            if any(img_url.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png"]) and "logo" not in img_url.lower() and "icon" not in img_url.lower():
-                wiki_images.append(img_url)
-except Exception: pass
+            img_url_lower = img_url.lower()
+            
+            # 확장자가 맞고, 찌꺼기 단어가 없으며, 중복이 아닐 때만 추가
+            if any(img_url_lower.endswith(ext) for ext in [".jpg", ".jpeg", ".png"]):
+                if not any(junk in img_url_lower for junk in junk_keywords) and img_url not in wiki_images:
+                    wiki_images.append(img_url)
+                    
+    print(f"  ✅ 필터링 완료: 총 {len(wiki_images)}장의 유효한 생물 사진을 찾았습니다.")
+except Exception as e: 
+    print(f"  ⚠️ 위키 이미지 수집 중 에러: {e}")
 
 # =====================================================================
 # 🎨 [Step 2] 썸네일 이미지 생성 시도 (4중 순위 및 유연한 포맷 추출)
@@ -121,73 +144,45 @@ is_dalle_success = False
 safe_prompt = "A highly detailed, cinematic National Geographic style 3D macro photography of a beautiful glowing microscopic cell or ancient plant organism in nature, educational science illustration, completely safe abstract biology concept, 8k resolution."
 dalle_prompt = "A cinematic, highly detailed 3D illustration of an ancient tree or cellular organism, beautiful nature environment, dynamic lighting, 8k resolution."
 
-# [1순위] gpt-image-2 시도
 try:
-    image_response = openai_client.images.generate(
-        model="gpt-image-2", 
-        prompt=safe_prompt,
-        size="1024x1024", quality="auto", n=1
-    )
+    image_response = openai_client.images.generate(model="gpt-image-2", prompt=safe_prompt, size="1024x1024", quality="auto", n=1)
     img_data = image_response.data[0]
-    if hasattr(img_data, 'url') and img_data.url:
-        thumbnail_source = {"type": "url", "value": img_data.url}
-    elif hasattr(img_data, 'b64_json') and img_data.b64_json:
-        thumbnail_source = {"type": "bytes", "value": base64.b64decode(img_data.b64_json)}
+    if hasattr(img_data, 'url') and img_data.url: thumbnail_source = {"type": "url", "value": img_data.url}
+    elif hasattr(img_data, 'b64_json') and img_data.b64_json: thumbnail_source = {"type": "bytes", "value": base64.b64decode(img_data.b64_json)}
     
     if thumbnail_source:
         is_dalle_success = True
         print("  ✅ [1순위 성공] gpt-image-2 썸네일 이미지 생성 완료!")
-    else:
-        raise Exception("응답 데이터에서 이미지 추출 실패")
-    
+    else: raise Exception("이미지 추출 실패")
 except Exception as e1:
     print(f"  ❌ 1순위(gpt-image-2) 실패: {e1}")
-    print("  🔄 [2순위 가동] dall-e-3 엔진으로 전환하여 즉시 재시도합니다...")
-    
-    # [2순위] dall-e-3 시도
+    print("  🔄 [2순위 가동] dall-e-3 엔진으로 재시도...")
     try:
-        image_response = openai_client.images.generate(
-            model="dall-e-3", 
-            prompt=dalle_prompt,
-            size="1024x1024", quality="standard", n=1
-        )
+        image_response = openai_client.images.generate(model="dall-e-3", prompt=dalle_prompt, size="1024x1024", quality="standard", n=1)
         img_data = image_response.data[0]
         if img_data.url:
             thumbnail_source = {"type": "url", "value": img_data.url}
             is_dalle_success = True
             print("  ✅ [2순위 성공] dall-e-3 썸네일 이미지 생성 완료!")
-        else:
-            raise Exception("URL 누락")
-        
+        else: raise Exception("URL 누락")
     except Exception as e2:
         print(f"  ❌ 2순위(dall-e-3) 실패: {e2}")
-        print("  🔄 [3순위 가동] gpt-image-1 엔진으로 전환하여 즉시 재시도합니다...")
-        
-        # [3순위] gpt-image-1 시도
+        print("  🔄 [3순위 가동] gpt-image-1 엔진으로 재시도...")
         try:
-            image_response = openai_client.images.generate(
-                model="gpt-image-1", 
-                prompt=safe_prompt,
-                size="1024x1024", quality="auto", n=1
-            )
+            image_response = openai_client.images.generate(model="gpt-image-1", prompt=safe_prompt, size="1024x1024", quality="auto", n=1)
             img_data = image_response.data[0]
-            if hasattr(img_data, 'url') and img_data.url:
-                thumbnail_source = {"type": "url", "value": img_data.url}
-            elif hasattr(img_data, 'b64_json') and img_data.b64_json:
-                thumbnail_source = {"type": "bytes", "value": base64.b64decode(img_data.b64_json)}
-            
+            if hasattr(img_data, 'url') and img_data.url: thumbnail_source = {"type": "url", "value": img_data.url}
+            elif hasattr(img_data, 'b64_json') and img_data.b64_json: thumbnail_source = {"type": "bytes", "value": base64.b64decode(img_data.b64_json)}
             if thumbnail_source:
                 is_dalle_success = True
                 print("  ✅ [3순위 성공] gpt-image-1 썸네일 이미지 생성 완료!")
-            else:
-                raise Exception("이미지 추출 실패")
-                
+            else: raise Exception("이미지 추출 실패")
         except Exception as e3:
             print(f"  ❌ 3순위(gpt-image-1) 실패: {e3}")
             print("  🔄 [4순위 가동] AI 생성 전원 실패. 위키미디어 사진으로 대체 준비.")
 
 # =====================================================================
-# ✍️ [Step 3] 다큐 본문 작성 (제미나이 2.5 버전 환경 유지)
+# ✍️ [Step 3] 다큐 본문 작성 (제미나이 2.5 고정)
 # =====================================================================
 print("\n[Step 3] 스토리앵글 맞춤형 대본(본문) 작성 중 (제미나이 2.5 고정)...")
 
@@ -239,7 +234,7 @@ for i in range(1, 4):
     blog_content = blog_content.replace(f"[WIKI_IMAGE_{i}]", "")
 
 # =====================================================================
-# 🌐 [Step 4] 미디어 업로드 (주소 및 로우 바이너리 투트랙 자동 대응)
+# 🌐 [Step 4] 미디어 업로드
 # =====================================================================
 media_id = None
 sources_to_try = []
@@ -261,8 +256,7 @@ else:
                 url = source["value"]
                 print(f"  🔄 [{attempt_idx+1}/{len(sources_to_try)}] 외부 주소 다운로드 중: {url[:50]}...")
                 download_headers = {"User-Agent": common_headers["User-Agent"]}
-                if not is_dalle_success:
-                    download_headers = wiki_headers
+                if not is_dalle_success: download_headers = wiki_headers
                 img_res = requests.get(url, headers=download_headers, timeout=30)
                 if img_res.status_code != 200: continue
                 image_bytes = img_res.content
@@ -272,15 +266,10 @@ else:
                 
             if not image_bytes: continue
             
-            # 파일 데이터 구조 정밀 판독
-            if image_bytes.startswith(b'\x89PNG'):
-                ext, mime_type = 'png', 'image/png'
-            elif image_bytes.startswith(b'\xff\xd8'):
-                ext, mime_type = 'jpg', 'image/jpeg'
-            elif image_bytes.startswith(b'RIFF') and b'WEBP' in image_bytes[8:12]:
-                ext, mime_type = 'webp', 'image/webp'
-            else:
-                ext, mime_type = 'png', 'image/png'
+            if image_bytes.startswith(b'\x89PNG'): ext, mime_type = 'png', 'image/png'
+            elif image_bytes.startswith(b'\xff\xd8'): ext, mime_type = 'jpg', 'image/jpeg'
+            elif image_bytes.startswith(b'RIFF') and b'WEBP' in image_bytes[8:12]: ext, mime_type = 'webp', 'image/webp'
+            else: ext, mime_type = 'png', 'image/png'
                 
             safe_slug = re.sub(r'[^a-zA-Z0-9]', '_', TARGET_SLUG)
             safe_filename = f"cover_{safe_slug}_{int(time.time())}.{ext}"
@@ -302,9 +291,6 @@ else:
                 print(f"  ❌ 업로드 실패 코드: {media_upload_res.status_code}")
         except Exception as e: 
             print(f"  ❌ 미디어 처리 중 예외 발생: {e}")
-
-    if not media_id:
-        print("  ❌ 모든 대표 이미지 후보 등록에 실패했습니다. 대표 이미지 없이 본문만 연결합니다.")
 
 print("\n[Step 4.5] 지정 카테고리 고유 ID 변환 및 태그 매핑 중...")
 category_id = get_or_create_wp_term(TARGET_CATEGORY, "categories")
