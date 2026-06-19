@@ -119,11 +119,11 @@ is_dalle_success = False
 
 # [Plan A] DALL-E 3 시도
 try:
-    image_response = openai_client.images.generate(
-        model="dall-e-3", 
-        prompt=f"A highly detailed, cinematic National Geographic style 3D illustration of {SCI_NAME}. Natural environment, dynamic lighting, 8k resolution.",
-        size="1024x1024", quality="standard", n=1
-    )
+        image_response = openai_client.images.generate(
+            model="gpt-image-2", 
+            prompt=f"A highly detailed, cinematic National Geographic style 3D illustration of {SCI_NAME}. Natural environment, dynamic lighting, 8k resolution.",
+            size="1024x1024", quality="auto", n=1  # standard를 auto로 변경!
+        )
     thumbnail_url = image_response.data[0].url
     is_dalle_success = True
     print("  ✅ [DALL-E 3 성공] 썸네일 이미지 생성 완료! (15달러 활용 중)")
@@ -177,9 +177,9 @@ prompt = f"""
 """
 
 try:
-    # 대표님이 지정하신 제미나이 2.5 버전을 1.5-pro로 명시하여 유료 등급 키 권한을 확실히 활용합니다.
-    response = gemini_client.models.generate_content(model='gemini-1.5-pro', contents=prompt)
-    blog_content = response.text
+        # 대표님께서 원래 쓰시던 2.5 버전으로 완벽 복구!
+        response = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        blog_content = response.text
     blog_content = blog_content.replace("```html\n", "").replace("```html", "").replace("```\n", "").replace("```", "").strip()
 except Exception as e:
     print(f"❌ 치명적 에러: 제미나이 본문 작성 도중 오류 발생: {e}")
