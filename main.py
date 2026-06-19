@@ -4,6 +4,7 @@ import json
 import warnings
 import re
 import time
+import base64
 import gspread
 from openai import OpenAI
 from google import genai 
@@ -111,14 +112,14 @@ try:
 except Exception: pass
 
 # =====================================================================
-# 🎨 [Step 2] 썸네일 이미지 생성 시도 (4중 순위 기반 라우팅)
+# 🎨 [Step 2] 썸네일 이미지 생성 시도 (4중 순위 및 유연한 포맷 추출)
 # =====================================================================
 print("\n[Step 2] 썸네일 대표 이미지 준비 중 (4중 순위 안전장치 가동)...")
-thumbnail_url = ""
+thumbnail_source = None
 is_dalle_success = False
 
-safe_prompt = "A highly detailed, cinematic National Geographic style 3D macro photography of a beautiful glowing microscopic cell in nature, educational science illustration, completely safe abstract biology concept, 8k resolution."
-dalle_prompt = "A cinematic, highly detailed 3D illustration of an abstract cellular organism, beautiful nature environment, dynamic lighting, 8k resolution."
+safe_prompt = "A highly detailed, cinematic National Geographic style 3D macro photography of a beautiful glowing microscopic cell or ancient plant organism in nature, educational science illustration, completely safe abstract biology concept, 8k resolution."
+dalle_prompt = "A cinematic, highly detailed 3D illustration of an ancient tree or cellular organism, beautiful nature environment, dynamic lighting, 8k resolution."
 
 # [1순위] gpt-image-2 시도
 try:
@@ -127,9 +128,17 @@ try:
         prompt=safe_prompt,
         size="1024x1024", quality="auto", n=1
     )
-    thumbnail_url = image_response.data[0].url
-    is_dalle_success = True
-    print("  ✅ [1순위 성공] gpt-image-2 썸네일 이미지 생성 완료!")
+    img_data = image_response.data[0]
+    if hasattr(img_data, 'url') and img_data.url:
+        thumbnail_source = {"type": "url", "value": img_data.url}
+    elif hasattr(img_data, 'b64_json') and img_data.b64_json:
+        thumbnail_source = {"type": "bytes", "value": base64.b64decode(img_data.b64_json)}
+    
+    if thumbnail_source:
+        is_dalle_success = True
+        print("  ✅ [1순위 성공] gpt-image-2 썸네일 이미지 생성 완료!")
+    else:
+        raise Exception("응답 데이터에서 이미지 추출 실패")
     
 except Exception as e1:
     print(f"  ❌ 1순위(gpt-image-2) 실패: {e1}")
@@ -142,9 +151,13 @@ except Exception as e1:
             prompt=dalle_prompt,
             size="1024x1024", quality="standard", n=1
         )
-        thumbnail_url = image_response.data[0].url
-        is_dalle_success = True
-        print("  ✅ [2순위 성공] dall-e-3 썸네일 이미지 생성 완료!")
+        img_data = image_response.data[0]
+        if img_data.url:
+            thumbnail_source = {"type": "url", "value": img_data.url}
+            is_dalle_success = True
+            print("  ✅ [2순위 성공] dall-e-3 썸네일 이미지 생성 완료!")
+        else:
+            raise Exception("URL 누락")
         
     except Exception as e2:
         print(f"  ❌ 2순위(dall-e-3) 실패: {e2}")
@@ -157,13 +170,21 @@ except Exception as e1:
                 prompt=safe_prompt,
                 size="1024x1024", quality="auto", n=1
             )
-            thumbnail_url = image_response.data[0].url
-            is_dalle_success = True
-            print("  ✅ [3순위 성공] gpt-image-1 썸네일 이미지 생성 완료!")
+            img_data = image_response.data[0]
+            if hasattr(img_data, 'url') and img_data.url:
+                thumbnail_source = {"type": "url", "value": img_data.url}
+            elif hasattr(img_data, 'b64_json') and img_data.b64_json:
+                thumbnail_source = {"type": "bytes", "value": base64.b64decode(img_data.b64_json)}
             
+            if thumbnail_source:
+                is_dalle_success = True
+                print("  ✅ [3순위 성공] gpt-image-1 썸네일 이미지 생성 완료!")
+            else:
+                raise Exception("이미지 추출 실패")
+                
         except Exception as e3:
             print(f"  ❌ 3순위(gpt-image-1) 실패: {e3}")
-            print("  🔄 [4순위 가동] AI 생성 전원 실패. 위키미디어 사진으로 썸네일 대체를 준비합니다.")
+            print("  🔄 [4순위 가동] AI 생성 전원 실패. 위키미디어 사진으로 대체 준비.")
 
 # =====================================================================
 # ✍️ [Step 3] 다큐 본문 작성 (제미나이 2.5 버전 환경 유지)
@@ -218,37 +239,40 @@ for i in range(1, 4):
     blog_content = blog_content.replace(f"[WIKI_IMAGE_{i}]", "")
 
 # =====================================================================
-# 🌐 [Step 4] 미디어 업로드 (정밀 다운로드 헤더 분리 및 100% 추적)
+# 🌐 [Step 4] 미디어 업로드 (주소 및 로우 바이너리 투트랙 자동 대응)
 # =====================================================================
 media_id = None
-urls_to_try = [thumbnail_url] if is_dalle_success else wiki_images
+sources_to_try = []
+
+if is_dalle_success and thumbnail_source:
+    sources_to_try.append(thumbnail_source)
+else:
+    for img_url in wiki_images:
+        if img_url:
+            sources_to_try.append({"type": "url", "value": img_url})
 
 print("\n[Step 4] 워드프레스에 썸네일 업로드 중...")
-if not urls_to_try:
+if not sources_to_try:
     print("  ⚠️ 업로드할 이미지 소스가 비어있습니다.")
 else:
-    for attempt_idx, url in enumerate(urls_to_try):
-        if not url:
-            print(f"  ⚠️ {attempt_idx+1}번째 이미지 링크가 올바르지 않습니다.")
-            continue
-            
-        print(f"  🔄 [{attempt_idx+1}/{len(urls_to_try)}] 이미지 다운로드 시도 중: {url[:60]}...")
+    for attempt_idx, source in enumerate(sources_to_try):
         try:
-            # 🔥 핵심 해결책: 오픈AI 이미지 다운로드 시, JSON 전용 Accept 헤더가 제거된 순수 브라우저 헤더를 사용합니다.
-            download_headers = {"User-Agent": common_headers["User-Agent"]}
-            if not is_dalle_success:
-                download_headers = wiki_headers
+            if source["type"] == "url":
+                url = source["value"]
+                print(f"  🔄 [{attempt_idx+1}/{len(sources_to_try)}] 외부 주소 다운로드 중: {url[:50]}...")
+                download_headers = {"User-Agent": common_headers["User-Agent"]}
+                if not is_dalle_success:
+                    download_headers = wiki_headers
+                img_res = requests.get(url, headers=download_headers, timeout=30)
+                if img_res.status_code != 200: continue
+                image_bytes = img_res.content
+            else:
+                print(f"  🔄 [{attempt_idx+1}/{len(sources_to_try)}] AI 생성 원본 바이너리 동기화 중...")
+                image_bytes = source["value"]
                 
-            img_res = requests.get(url, headers=download_headers, timeout=30)
+            if not image_bytes: continue
             
-            if img_res.status_code != 200:
-                print(f"  ❌ 이미지 파일 다운로드 실패 (HTTP 상태코드: {img_res.status_code})")
-                continue
-                
-            image_bytes = img_res.content
-            print(f"  📥 다운로드 완료 ({len(image_bytes)} 바이트). 바이트 헤더 정밀 분석 중...")
-            
-            # 실제 파일 내부 바이너리 판독
+            # 파일 데이터 구조 정밀 판독
             if image_bytes.startswith(b'\x89PNG'):
                 ext, mime_type = 'png', 'image/png'
             elif image_bytes.startswith(b'\xff\xd8'):
@@ -256,14 +280,10 @@ else:
             elif image_bytes.startswith(b'RIFF') and b'WEBP' in image_bytes[8:12]:
                 ext, mime_type = 'webp', 'image/webp'
             else:
-                actual_type = img_res.headers.get('Content-Type', '').lower()
-                if 'webp' in actual_type: ext, mime_type = 'webp', 'image/webp'
-                elif 'jpeg' in actual_type or 'jpg' in actual_type: ext, mime_type = 'jpg', 'image/jpeg'
-                else: ext, mime_type = 'png', 'image/png'
+                ext, mime_type = 'png', 'image/png'
                 
             safe_slug = re.sub(r'[^a-zA-Z0-9]', '_', TARGET_SLUG)
             safe_filename = f"cover_{safe_slug}_{int(time.time())}.{ext}"
-            print(f"  📁 포맷 확정 완료: 명칭={safe_filename}, 타입={mime_type}")
                 
             media_headers = common_headers.copy()
             media_headers.update({
@@ -271,7 +291,6 @@ else:
                 'Content-Disposition': f'attachment; filename="{safe_filename}"'
             })
             
-            print("  📤 워드프레스 서버 라이브러리로 미디어 전송 중...")
             time.sleep(2)
             media_upload_res = requests.post(f"{WP_URL}/media", headers=media_headers, auth=(WP_USER, WP_APP_PASSWORD), data=image_bytes, timeout=60)
             
@@ -280,12 +299,12 @@ else:
                 print(f"  ✅ 대표 이미지 지정 대성공! (Media ID: {media_id})")
                 break 
             else:
-                print(f"  ❌ 워드프레스 등록 거부: 응답코드 {media_upload_res.status_code}, 상세사유: {media_upload_res.text[:150]}")
+                print(f"  ❌ 업로드 실패 코드: {media_upload_res.status_code}")
         except Exception as e: 
-            print(f"  ❌ 썸네일 다운/업로드 처리 중 예외 발생: {e}")
+            print(f"  ❌ 미디어 처리 중 예외 발생: {e}")
 
     if not media_id:
-        print("  ❌ 모든 대표 이미지 후보가 최종 등록에 실패했습니다. 대표 이미지 없이 본문만 연결합니다.")
+        print("  ❌ 모든 대표 이미지 후보 등록에 실패했습니다. 대표 이미지 없이 본문만 연결합니다.")
 
 print("\n[Step 4.5] 지정 카테고리 고유 ID 변환 및 태그 매핑 중...")
 category_id = get_or_create_wp_term(TARGET_CATEGORY, "categories")
