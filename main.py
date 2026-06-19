@@ -256,7 +256,7 @@ if category_id: post_data["categories"] = [category_id]
 if tag_ids: post_data["tags"] = tag_ids
 
 try:
-    post_res = requests.post(f"{WP_URL}/posts", headers=common_headers, auth=(WP_USER, WP_APP_PASSWORD), json=post_data, timeout=60)
+    post_res = requests.post(f"{WP_URL}/posts", headers=common_headers, auth=(WP_USER, WP_APP_PASSWORD), json=post_data, timeout=120)
     if post_res.status_code == 201:
         print("  🎉 [발행 대성공!] 글과 이미지가 정상 발행되었습니다.")
         worksheet.update_cell(target_row_index, 1, "완료")
