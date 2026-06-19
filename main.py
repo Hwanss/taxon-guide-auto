@@ -30,7 +30,7 @@ common_headers = {
 }
 
 print("="*60)
-print("📊 [TaxonGuru] WP 보안 우회 & Fail-safe 생물 도감 가동")
+print("📊 [TaxonGuru] WP 철통보안 우회 & 자동 썸네일 탐색 가동")
 print("="*60)
 
 # =====================================================================
@@ -89,7 +89,7 @@ def get_or_create_wp_term(term_name, taxonomy="categories"):
     return None
 
 # =====================================================================
-# 🔍 [Step 1] 위키미디어 이미지 수집
+# 🔍 [Step 1] 위키미디어 이미지 수집 (안전한 확장자만)
 # =====================================================================
 wiki_url = "https://en.wikipedia.org/w/api.php"
 wiki_params = {"action": "query", "titles": SCI_NAME, "generator": "images", "gimlimit": "10", "prop": "imageinfo", "iiprop": "url", "format": "json", "redirects": "1"}
@@ -100,12 +100,13 @@ try:
     for pid, pdata in pages.items():
         if "imageinfo" in pdata:
             img_url = pdata["imageinfo"][0]["url"]
-            if any(img_url.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp"]) and "logo" not in img_url.lower() and "icon" not in img_url.lower():
+            # 워드프레스가 거부하는 svg, webp 등은 아예 목록에서 제외
+            if any(img_url.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png"]) and "logo" not in img_url.lower() and "icon" not in img_url.lower():
                 wiki_images.append(img_url)
 except Exception: pass
 
 # =====================================================================
-# 🎨 [Step 2] 썸네일 이미지 준비 (DALL-E 3 에러 시 위키 자동 대체)
+# 🎨 [Step 2] 썸네일 이미지 생성 시도
 # =====================================================================
 print("\n[Step 2] 썸네일 대표 이미지 준비 중...")
 thumbnail_url = ""
@@ -120,17 +121,11 @@ try:
     is_dalle_success = True
     print("  ✅ DALL-E 3 썸네일 이미지 생성 성공!")
 except Exception as e:
-    # 에러 내용을 파악하기 위해 e 출력 추가
-    print(f"  ❌ DALL-E 3 통신 실패: {e}") 
-    print("  🔄 [Plan B 자동 가동] 위키미디어 실제 사진으로 썸네일을 대체합니다.")
-    if wiki_images:
-        thumbnail_url = wiki_images[0]
-        print("  ✅ 대체 썸네일(위키미디어) 확보 완료!")
-    else:
-        print("  ⚠️ 대체할 사진이 부족하여 썸네일 없이 진행합니다.")
+    print(f"  ❌ DALL-E 3 통신 실패: {e}")
+    print("  🔄 [Plan B] 위키미디어 사진으로 썸네일 대체를 준비합니다.")
 
 # =====================================================================
-# ✍️ [Step 3] 본문 사이사이 강제 사진 배치 다큐 본문 작성
+# ✍️ [Step 3] 다큐 본문 작성
 # =====================================================================
 print("\n[Step 3] 스토리앵글 맞춤형 대본(본문) 작성 중...")
 
@@ -159,24 +154,14 @@ prompt = f"""
 """
 
 try:
-    response = gemini_client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=prompt
-    )
+    response = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
     blog_content = response.text
-    
-    # 여러 줄로 안전하게 쪼개기
-    blog_content = blog_content.replace("```html\n", "")
-    blog_content = blog_content.replace("```html", "")
-    blog_content = blog_content.replace("```\n", "")
-    blog_content = blog_content.replace("```", "")
-    blog_content = blog_content.strip()
-    
+    blog_content = blog_content.replace("```html\n", "").replace("```html", "").replace("```\n", "").replace("```", "").strip()
 except Exception as e:
-    print(f"❌ 치명적 에러: 제미나이 본문 작성 도중 오류가 발생했습니다: {e}")
+    print(f"❌ 치명적 에러: 제미나이 본문 작성 도중 오류 발생: {e}")
     exit(1)
 
-# 썸네일로 사용된 위키 사진이 있다면 본문 중복을 피하기 위해 다음 사진들부터 배치
+# 본문 사진 배치 (썸네일과 안 겹치게)
 body_images = wiki_images[1:] if (not is_dalle_success and wiki_images) else wiki_images
 
 if body_images:
@@ -192,50 +177,55 @@ for i in range(1, 4):
     blog_content = blog_content.replace(f"[WIKI_IMAGE_{i}]", "")
 
 # =====================================================================
-# 🌐 [Step 4] 워드프레스 미디어 업로드 (WP 보안 에러 완벽 회피)
+# 🌐 [Step 4] 집요한 워드프레스 미디어 업로드 (안전성 대폭 강화)
 # =====================================================================
 media_id = None
-if thumbnail_url:
-    print("\n[Step 4] 워드프레스에 썸네일 업로드 중...")
-    try:
-        img_res = requests.get(thumbnail_url, timeout=30)
-        img_data = img_res.content
-        
-        # 🔥 실제 파일의 정체(Content-Type)를 파악하여 워드프레스를 속이는 안전 포장
-        actual_type = img_res.headers.get('Content-Type', '')
-        
-        if 'png' in actual_type.lower():
-            ext = 'png'
-            mime_type = 'image/png'
-        elif 'webp' in actual_type.lower():
-            ext = 'webp'
-            mime_type = 'image/webp'
-        elif 'gif' in actual_type.lower():
-            ext = 'gif'
-            mime_type = 'image/gif'
-        else:
-            ext = 'jpg'
-            mime_type = 'image/jpeg'
+urls_to_try = [thumbnail_url] if is_dalle_success else wiki_images
+
+print("\n[Step 4] 워드프레스에 썸네일 업로드 중...")
+if not urls_to_try:
+    print("  ⚠️ 업로드할 이미지 소스가 없습니다.")
+else:
+    for attempt_idx, url in enumerate(urls_to_try):
+        if not url: continue
+        try:
+            img_res = requests.get(url, timeout=30)
+            actual_type = img_res.headers.get('Content-Type', '').lower()
             
-        # 파일명에 특수문자가 들어가면 워드프레스가 거부하므로 순수 영문/숫자로만 변환
-        safe_slug = re.sub(r'[^a-zA-Z0-9]', '_', TARGET_SLUG)
-        safe_filename = f"cover_{safe_slug}.{ext}"
+            # 워드프레스가 합격시키는 안전한 포맷만 필터링
+            if 'jpeg' in actual_type or 'jpg' in actual_type:
+                ext = 'jpg'
+                mime_type = 'image/jpeg'
+            elif 'png' in actual_type:
+                ext = 'png'
+                mime_type = 'image/png'
+            else:
+                print(f"  ⚠️ WP 보안 차단 예상 포맷({actual_type}) 패스 -> 다음 사진 시도")
+                continue
+                
+            safe_slug = re.sub(r'[^a-zA-Z0-9]', '_', TARGET_SLUG)
+            safe_filename = f"cover_{safe_slug}_{int(time.time())}.{ext}"
+                
+            media_headers = common_headers.copy()
+            media_headers.update({
+                'Content-Type': mime_type, 
+                'Content-Disposition': f'attachment; filename="{safe_filename}"'
+            })
             
-        media_headers = common_headers.copy()
-        media_headers.update({
-            'Content-Type': mime_type, 
-            'Content-Disposition': f'attachment; filename="{safe_filename}"'
-        })
-        time.sleep(3)
-        media_upload_res = requests.post(f"{WP_URL}/media", headers=media_headers, auth=(WP_USER, WP_APP_PASSWORD), data=img_data, timeout=60)
-        
-        if media_upload_res.status_code == 201: 
-            media_id = media_upload_res.json().get('id')
-            print(f"  ✅ 썸네일 업로드 성공! (Media ID: {media_id})")
-        else:
-            print(f"  ❌ 썸네일 업로드 거부됨 (응답 코드 {media_upload_res.status_code}): {media_upload_res.text}")
-    except Exception as e: 
-        print(f"  ❌ 썸네일 업로드 중 통신 에러: {e}")
+            time.sleep(2)
+            media_upload_res = requests.post(f"{WP_URL}/media", headers=media_headers, auth=(WP_USER, WP_APP_PASSWORD), data=img_res.content, timeout=60)
+            
+            if media_upload_res.status_code == 201: 
+                media_id = media_upload_res.json().get('id')
+                print(f"  ✅ 썸네일 업로드 성공! (Media ID: {media_id})")
+                break # 업로드 성공 시 반복문 즉시 종료
+            else:
+                print(f"  ❌ 업로드 거부 (응답 {media_upload_res.status_code}) -> 다음 사진 시도")
+        except Exception as e: 
+            print(f"  ❌ 업로드 중 통신 에러 -> 다음 사진 시도")
+
+    if not media_id:
+        print("  ❌ 모든 썸네일 후보가 워드프레스 보안에 막혔습니다. 썸네일 없이 발행합니다.")
 
 print("\n[Step 4.5] 지정 카테고리 고유 ID 변환 및 태그 매핑 중...")
 category_id = get_or_create_wp_term(TARGET_CATEGORY, "categories")
