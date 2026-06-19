@@ -24,13 +24,19 @@ OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
+# 워드프레스용 일반 헤더
 common_headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 TaxonGuru/2.0",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept": "application/json"
 }
 
+# 🔥 위키피디아 전용 공식 봇 헤더 (차단 회피용 신분증)
+wiki_headers = {
+    "User-Agent": "TaxonGuruBot/1.0 (https://taxonguru.com; admin@taxonguru.com)"
+}
+
 print("="*60)
-print("📊 [TaxonGuru] WP 철통보안 우회 & 자동 썸네일 탐색 가동")
+print("📊 [TaxonGuru] WP 철통보안 & 위키 차단 우회 시스템 가동")
 print("="*60)
 
 # =====================================================================
@@ -89,18 +95,17 @@ def get_or_create_wp_term(term_name, taxonomy="categories"):
     return None
 
 # =====================================================================
-# 🔍 [Step 1] 위키미디어 이미지 수집 (안전한 확장자만)
+# 🔍 [Step 1] 위키미디어 이미지 수집 (공식 봇 헤더 사용)
 # =====================================================================
 wiki_url = "https://en.wikipedia.org/w/api.php"
 wiki_params = {"action": "query", "titles": SCI_NAME, "generator": "images", "gimlimit": "10", "prop": "imageinfo", "iiprop": "url", "format": "json", "redirects": "1"}
 wiki_images = []
 try:
-    wiki_res = requests.get(wiki_url, params=wiki_params, headers=common_headers, timeout=20)
+    wiki_res = requests.get(wiki_url, params=wiki_params, headers=wiki_headers, timeout=20)
     pages = wiki_res.json().get("query", {}).get("pages", {})
     for pid, pdata in pages.items():
         if "imageinfo" in pdata:
             img_url = pdata["imageinfo"][0]["url"]
-            # 워드프레스가 거부하는 svg, webp 등은 아예 목록에서 제외
             if any(img_url.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png"]) and "logo" not in img_url.lower() and "icon" not in img_url.lower():
                 wiki_images.append(img_url)
 except Exception: pass
@@ -161,7 +166,7 @@ except Exception as e:
     print(f"❌ 치명적 에러: 제미나이 본문 작성 도중 오류 발생: {e}")
     exit(1)
 
-# 본문 사진 배치 (썸네일과 안 겹치게)
+# 본문 사진 배치
 body_images = wiki_images[1:] if (not is_dalle_success and wiki_images) else wiki_images
 
 if body_images:
@@ -177,7 +182,7 @@ for i in range(1, 4):
     blog_content = blog_content.replace(f"[WIKI_IMAGE_{i}]", "")
 
 # =====================================================================
-# 🌐 [Step 4] 집요한 워드프레스 미디어 업로드 (안전성 대폭 강화)
+# 🌐 [Step 4] 미디어 업로드 (위키 전용 헤더로 다운로드)
 # =====================================================================
 media_id = None
 urls_to_try = [thumbnail_url] if is_dalle_success else wiki_images
@@ -189,10 +194,10 @@ else:
     for attempt_idx, url in enumerate(urls_to_try):
         if not url: continue
         try:
-            img_res = requests.get(url, timeout=30)
+            # 🔥 다운로드 시에도 위키 공식 헤더 사용
+            img_res = requests.get(url, headers=wiki_headers if not is_dalle_success else common_headers, timeout=30)
             actual_type = img_res.headers.get('Content-Type', '').lower()
             
-            # 워드프레스가 합격시키는 안전한 포맷만 필터링
             if 'jpeg' in actual_type or 'jpg' in actual_type:
                 ext = 'jpg'
                 mime_type = 'image/jpeg'
@@ -218,7 +223,7 @@ else:
             if media_upload_res.status_code == 201: 
                 media_id = media_upload_res.json().get('id')
                 print(f"  ✅ 썸네일 업로드 성공! (Media ID: {media_id})")
-                break # 업로드 성공 시 반복문 즉시 종료
+                break 
             else:
                 print(f"  ❌ 업로드 거부 (응답 {media_upload_res.status_code}) -> 다음 사진 시도")
         except Exception as e: 
