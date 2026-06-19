@@ -219,7 +219,7 @@ for i in range(1, 4):
     blog_content = blog_content.replace(f"[WIKI_IMAGE_{i}]", "")
 
 # =====================================================================
-# 🌐 [Step 4] 미디어 업로드 (위키 전용 헤더로 다운로드)
+# 🌐 [Step 4] 미디어 업로드 (확장자 강제 지정 및 상세 에러 로깅)
 # =====================================================================
 media_id = None
 urls_to_try = [thumbnail_url] if is_dalle_success else wiki_images
@@ -232,17 +232,20 @@ else:
         if not url: continue
         try:
             img_res = requests.get(url, headers=wiki_headers if not is_dalle_success else common_headers, timeout=30)
-            actual_type = img_res.headers.get('Content-Type', '').lower()
             
-            if 'jpeg' in actual_type or 'jpg' in actual_type:
-                ext = 'jpg'
-                mime_type = 'image/jpeg'
-            elif 'png' in actual_type:
+            # 🔥 해결책: OpenAI 이미지는 이름표(Content-Type)를 무시하고 무조건 PNG 파일로 강제 취급합니다.
+            if is_dalle_success:
                 ext = 'png'
                 mime_type = 'image/png'
             else:
-                print(f"  ⚠️ WP 보안 차단 예상 포맷({actual_type}) 패스 -> 다음 사진 시도")
-                continue
+                actual_type = img_res.headers.get('Content-Type', '').lower()
+                if 'png' in actual_type:
+                    ext = 'png'
+                    mime_type = 'image/png'
+                else: 
+                    # 위키미디어 사진들도 웬만하면 강제로 JPG로 취급하여 에러를 방지합니다.
+                    ext = 'jpg'
+                    mime_type = 'image/jpeg'
                 
             safe_slug = re.sub(r'[^a-zA-Z0-9]', '_', TARGET_SLUG)
             safe_filename = f"cover_{safe_slug}_{int(time.time())}.{ext}"
@@ -261,12 +264,13 @@ else:
                 print(f"  ✅ 썸네일 업로드 성공! (Media ID: {media_id})")
                 break 
             else:
-                print(f"  ❌ 업로드 거부 (응답 {media_upload_res.status_code}) -> 다음 사진 시도")
+                # 워드프레스가 거부한 '진짜 이유'를 화면에 출력합니다.
+                print(f"  ❌ 업로드 거부: 응답코드 {media_upload_res.status_code}, 상세이유: {media_upload_res.text}")
         except Exception as e: 
-            print(f"  ❌ 업로드 중 통신 에러 -> 다음 사진 시도")
+            print(f"  ❌ 썸네일 처리 중 통신 에러 발생: {e}")
 
     if not media_id:
-        print("  ❌ 모든 썸네일 후보가 워드프레스 보안에 막혔습니다. 썸네일 없이 발행합니다.")
+        print("  ❌ 모든 썸네일 후보가 업로드에 실패했습니다. 썸네일 없이 발행합니다.")
 
 print("\n[Step 4.5] 지정 카테고리 고유 ID 변환 및 태그 매핑 중...")
 category_id = get_or_create_wp_term(TARGET_CATEGORY, "categories")
