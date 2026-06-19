@@ -119,11 +119,11 @@ is_dalle_success = False
 
 # [Plan A] DALL-E 3 시도
 try:
-        image_response = openai_client.images.generate(
-            model="gpt-image-2", 
-            prompt=f"A highly detailed, cinematic National Geographic style 3D illustration of {SCI_NAME}. Natural environment, dynamic lighting, 8k resolution.",
-            size="1024x1024", quality="auto", n=1  # standard를 auto로 변경!
-        )
+    image_response = openai_client.images.generate(
+        model="dall-e-3", 
+        prompt=f"A highly detailed, cinematic National Geographic style 3D illustration of {SCI_NAME}. Natural environment, dynamic lighting, 8k resolution.",
+        size="1024x1024", quality="standard", n=1
+    )
     thumbnail_url = image_response.data[0].url
     is_dalle_success = True
     print("  ✅ [DALL-E 3 성공] 썸네일 이미지 생성 완료! (15달러 활용 중)")
@@ -137,7 +137,7 @@ except Exception as e1:
         image_response = openai_client.images.generate(
             model="gpt-image-2", 
             prompt=f"A highly detailed, cinematic National Geographic style 3D illustration of {SCI_NAME}. Natural environment, dynamic lighting, 8k resolution.",
-            size="1024x1024", quality="standard", n=1
+            size="1024x1024", quality="auto", n=1  # standard를 auto로 수정 완료
         )
         thumbnail_url = image_response.data[0].url
         is_dalle_success = True
@@ -177,9 +177,9 @@ prompt = f"""
 """
 
 try:
-        # 대표님께서 원래 쓰시던 2.5 버전으로 완벽 복구!
-        response = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-        blog_content = response.text
+    # 대표님이 지정하신 제미나이 2.5 버전으로 완벽 복구
+    response = gemini_client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+    blog_content = response.text
     blog_content = blog_content.replace("```html\n", "").replace("```html", "").replace("```\n", "").replace("```", "").strip()
 except Exception as e:
     print(f"❌ 치명적 에러: 제미나이 본문 작성 도중 오류 발생: {e}")
@@ -238,7 +238,7 @@ else:
             })
             
             time.sleep(2)
-            # 호스팅어 보안 타임아웃 문제를 해결하기 위해 타임아웃을 60초로 늘렸습니다.
+            # 호스팅어 보안 타임아웃 문제를 해결하기 위해 타임아웃을 60초로 넉넉히 설정
             media_upload_res = requests.post(f"{WP_URL}/media", headers=media_headers, auth=(WP_USER, WP_APP_PASSWORD), data=img_res.content, timeout=60)
             
             if media_upload_res.status_code == 201: 
@@ -277,11 +277,11 @@ if category_id: post_data["categories"] = [category_id]
 if tag_ids: post_data["tags"] = tag_ids
 
 try:
-    # 최종 발행 통신 에러(타임아웃)를 해결하기 위해 타임아웃을 120초로 대폭 늘렸습니다.
+    # 최종 발행 통신 에러(타임아웃)를 해결하기 위해 타임아웃 120초 유지
     post_res = requests.post(f"{WP_URL}/posts", headers=common_headers, auth=(WP_USER, WP_APP_PASSWORD), json=post_data, timeout=120)
     if post_res.status_code == 201:
         print("  🎉 [발행 대성공!] 글과 이미지가 정상 발행되었습니다.")
-        # 발행 성공 시에만 시트 상태를 완료로 변경합니다.
+        # 발행 성공 시에만 시트 상태를 완료로 변경
         worksheet.update_cell(target_row_index, 1, "완료")
     else:
         print(f"  ❌ 발행 실패: {post_res.text}")
