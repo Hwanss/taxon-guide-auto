@@ -30,7 +30,7 @@ common_headers = {
 }
 
 print("="*60)
-print("📊 [TaxonGuru] Fail-safe 장착 생물 도감 매핑 & 발행 가동")
+print("📊 [TaxonGuru] WP 보안 우회 & Fail-safe 생물 도감 가동")
 print("="*60)
 
 # =====================================================================
@@ -100,7 +100,7 @@ try:
     for pid, pdata in pages.items():
         if "imageinfo" in pdata:
             img_url = pdata["imageinfo"][0]["url"]
-            if any(img_url.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png"]) and "logo" not in img_url.lower() and "icon" not in img_url.lower():
+            if any(img_url.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp"]) and "logo" not in img_url.lower() and "icon" not in img_url.lower():
                 wiki_images.append(img_url)
 except Exception: pass
 
@@ -120,7 +120,8 @@ try:
     is_dalle_success = True
     print("  ✅ DALL-E 3 썸네일 이미지 생성 성공!")
 except Exception as e:
-    print(f"  ❌ DALL-E 3 통신 실패 (서버 딜레이 등)")
+    # 에러 내용을 파악하기 위해 e 출력 추가
+    print(f"  ❌ DALL-E 3 통신 실패: {e}") 
     print("  🔄 [Plan B 자동 가동] 위키미디어 실제 사진으로 썸네일을 대체합니다.")
     if wiki_images:
         thumbnail_url = wiki_images[0]
@@ -164,8 +165,10 @@ try:
     )
     blog_content = response.text
     
-    # 🔥 에러가 났던 문자열 정리 구간을 가장 안전한 방식으로 변경했습니다.
+    # 여러 줄로 안전하게 쪼개기
+    blog_content = blog_content.replace("```html\n", "")
     blog_content = blog_content.replace("```html", "")
+    blog_content = blog_content.replace("```\n", "")
     blog_content = blog_content.replace("```", "")
     blog_content = blog_content.strip()
     
@@ -189,33 +192,48 @@ for i in range(1, 4):
     blog_content = blog_content.replace(f"[WIKI_IMAGE_{i}]", "")
 
 # =====================================================================
-# 🌐 [Step 4] 워드프레스 미디어 업로드 (안전성 강화)
+# 🌐 [Step 4] 워드프레스 미디어 업로드 (WP 보안 에러 완벽 회피)
 # =====================================================================
 media_id = None
 if thumbnail_url:
     print("\n[Step 4] 워드프레스에 썸네일 업로드 중...")
     try:
-        img_data = requests.get(thumbnail_url, timeout=30).content
+        img_res = requests.get(thumbnail_url, timeout=30)
+        img_data = img_res.content
         
-        # 확장자 자동 판별
-        ext = "png" if is_dalle_success else "jpg"
-        if not is_dalle_success:
-            if ".png" in thumbnail_url.lower(): ext = "png"
-            elif ".jpeg" in thumbnail_url.lower(): ext = "jpeg"
+        # 🔥 실제 파일의 정체(Content-Type)를 파악하여 워드프레스를 속이는 안전 포장
+        actual_type = img_res.headers.get('Content-Type', '')
+        
+        if 'png' in actual_type.lower():
+            ext = 'png'
+            mime_type = 'image/png'
+        elif 'webp' in actual_type.lower():
+            ext = 'webp'
+            mime_type = 'image/webp'
+        elif 'gif' in actual_type.lower():
+            ext = 'gif'
+            mime_type = 'image/gif'
+        else:
+            ext = 'jpg'
+            mime_type = 'image/jpeg'
+            
+        # 파일명에 특수문자가 들어가면 워드프레스가 거부하므로 순수 영문/숫자로만 변환
+        safe_slug = re.sub(r'[^a-zA-Z0-9]', '_', TARGET_SLUG)
+        safe_filename = f"cover_{safe_slug}.{ext}"
             
         media_headers = common_headers.copy()
         media_headers.update({
-            'Content-Type': f'image/{ext}', 
-            'Content-Disposition': f'attachment; filename="{TARGET_SLUG}_cover.{ext}"'
+            'Content-Type': mime_type, 
+            'Content-Disposition': f'attachment; filename="{safe_filename}"'
         })
         time.sleep(3)
-        media_res = requests.post(f"{WP_URL}/media", headers=media_headers, auth=(WP_USER, WP_APP_PASSWORD), data=img_data, timeout=60)
+        media_upload_res = requests.post(f"{WP_URL}/media", headers=media_headers, auth=(WP_USER, WP_APP_PASSWORD), data=img_data, timeout=60)
         
-        if media_res.status_code == 201: 
-            media_id = media_res.json().get('id')
+        if media_upload_res.status_code == 201: 
+            media_id = media_upload_res.json().get('id')
             print(f"  ✅ 썸네일 업로드 성공! (Media ID: {media_id})")
         else:
-            print(f"  ❌ 썸네일 업로드 거부됨 (응답 코드 {media_res.status_code}): {media_res.text}")
+            print(f"  ❌ 썸네일 업로드 거부됨 (응답 코드 {media_upload_res.status_code}): {media_upload_res.text}")
     except Exception as e: 
         print(f"  ❌ 썸네일 업로드 중 통신 에러: {e}")
 
