@@ -25,13 +25,11 @@ OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-# 워드프레스용 일반 헤더
 common_headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept": "application/json"
 }
 
-# 🔥 위키피디아 전용 공식 봇 헤더 (차단 회피용 신분증)
 wiki_headers = {
     "User-Agent": "TaxonGuruBot/1.0 (https://taxonguru.com; admin@taxonguru.com)"
 }
@@ -102,11 +100,9 @@ print("\n[Step 1] 위키미디어 생물 사진 수집 중...")
 wiki_url = "https://en.wikipedia.org/w/api.php"
 wiki_images = []
 
-# 🚫 거를 찌꺼기 키워드 (지도, 잠수함, 인물, 그래프 등)
 junk_keywords = ["map", "distribution", "locator", "world", "alvin", "sub", "graph", "chart", "logo", "icon", "person", "scientist", "flag"]
 
 try:
-    # 1차 시도: 문서의 대표 사진(Infobox Image) 1장 먼저 무조건 확보
     main_img_params = {"action": "query", "titles": SCI_NAME, "prop": "pageimages", "pithumbsize": "1000", "format": "json", "redirects": "1"}
     main_res = requests.get(wiki_url, params=main_img_params, headers=wiki_headers, timeout=20)
     pages = main_res.json().get("query", {}).get("pages", {})
@@ -115,7 +111,6 @@ try:
             wiki_images.append(pdata["thumbnail"]["source"])
             print("  ✅ 위키 문서 대표 생물 사진 확보 완료")
 
-    # 2차 시도: 본문에 들어갈 나머지 사진들 확보 (찌꺼기 필터링 적용)
     wiki_params = {"action": "query", "titles": SCI_NAME, "generator": "images", "gimlimit": "15", "prop": "imageinfo", "iiprop": "url", "format": "json", "redirects": "1"}
     wiki_res = requests.get(wiki_url, params=wiki_params, headers=wiki_headers, timeout=20)
     pages2 = wiki_res.json().get("query", {}).get("pages", {})
@@ -124,8 +119,6 @@ try:
         if "imageinfo" in pdata:
             img_url = pdata["imageinfo"][0]["url"]
             img_url_lower = img_url.lower()
-            
-            # 확장자가 맞고, 찌꺼기 단어가 없으며, 중복이 아닐 때만 추가
             if any(img_url_lower.endswith(ext) for ext in [".jpg", ".jpeg", ".png"]):
                 if not any(junk in img_url_lower for junk in junk_keywords) and img_url not in wiki_images:
                     wiki_images.append(img_url)
@@ -135,14 +128,15 @@ except Exception as e:
     print(f"  ⚠️ 위키 이미지 수집 중 에러: {e}")
 
 # =====================================================================
-# 🎨 [Step 2] 썸네일 이미지 생성 시도 (4중 순위 및 유연한 포맷 추출)
+# 🎨 [Step 2] 썸네일 이미지 생성 시도 (맞춤형 동적 프롬프트 복구!)
 # =====================================================================
 print("\n[Step 2] 썸네일 대표 이미지 준비 중 (4중 순위 안전장치 가동)...")
 thumbnail_source = None
 is_dalle_success = False
 
-safe_prompt = "A highly detailed, cinematic National Geographic style 3D macro photography of a beautiful glowing microscopic cell or ancient plant organism in nature, educational science illustration, completely safe abstract biology concept, 8k resolution."
-dalle_prompt = "A cinematic, highly detailed 3D illustration of an ancient tree or cellular organism, beautiful nature environment, dynamic lighting, 8k resolution."
+# 🔥 해결책: 무조건 세포를 그리는 게 아니라, 시트의 동물 이름(COMMON_NAME)을 직접 넣어서 그리도록 수정했습니다.
+safe_prompt = f"A highly detailed, cinematic National Geographic style 3D illustration of a {COMMON_NAME} ({SCI_NAME}) in its natural habitat. Educational science illustration, completely safe and beautiful nature photography, 8k resolution."
+dalle_prompt = f"A cinematic, highly detailed 3D illustration of a {COMMON_NAME} ({SCI_NAME}), beautiful nature environment, dynamic lighting, 8k resolution."
 
 try:
     image_response = openai_client.images.generate(model="gpt-image-2", prompt=safe_prompt, size="1024x1024", quality="auto", n=1)
