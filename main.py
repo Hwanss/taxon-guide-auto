@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 import warnings
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -98,26 +99,26 @@ EXTRA_HEADERS = [
     "오류",
 ]
 HEADER_ALIASES = {
-    "status": ["상태"],
-    "scientific_name": ["학명"],
-    "title": ["국문/영문명", "제목"],
-    "taxonomy": ["분류 트리", "분류트리"],
-    "category": ["카테고리"],
-    "story_angle": ["스토리앵글", "스토리 앵글"],
-    "slug": ["슬러그"],
-    "tags": ["태그"],
+    "status": ["상태", "진행상태"],
+    "scientific_name": ["학명", "학명(Scientific Name)", "학명 (Scientific Name)"],
+    "title": ["국문/영문명", "제목", "국문/영문명(Title)", "국문/영문명 (Title)"],
+    "taxonomy": ["분류 트리", "분류트리", "분류 트리(Taxonomy)", "분류 트리 (Taxonomy)"],
+    "category": ["카테고리", "카테고리(Category)", "카테고리 (Category)"],
+    "story_angle": ["스토리앵글", "스토리 앵글", "스토리 앵글(Story Angle)", "스토리 앵글 (Story Angle)"],
+    "slug": ["슬러그", "슬러그(Slug)", "슬러그 (Slug)"],
+    "tags": ["태그", "태그(Tags)", "태그 (Tags)"],
     "reviewer": ["검수자"],
     "review_date": ["검수일"],
     "review_note": ["검수메모"],
     "language": ["언어"],
-    "post_id": ["WP_POST_ID"],
-    "edit_url": ["편집URL"],
-    "public_url": ["공개URL"],
-    "quality_score": ["품질점수"],
-    "source_count": ["자료수"],
-    "scheduled_date": ["예약일"],
-    "auto_review_result": ["자동검수결과"],
-    "error": ["오류"],
+    "post_id": ["WP_POST_ID", "WP POST ID"],
+    "edit_url": ["편집URL", "편집 URL"],
+    "public_url": ["공개URL", "공개 URL"],
+    "quality_score": ["품질점수", "품질 점수"],
+    "source_count": ["자료수", "자료 수"],
+    "scheduled_date": ["예약일", "예약 일시"],
+    "auto_review_result": ["자동검수결과", "자동 검수 결과"],
+    "error": ["오류", "에러"],
 }
 
 
@@ -360,25 +361,74 @@ def column_letter(index: int) -> str:
     return result
 
 
+def normalize_header_name(value: str) -> str:
+    """헤더 표기의 공백·영문 괄호 설명 차이를 제거해 비교합니다.
+
+    예: ``학명(Scientific Name)`` -> ``학명``
+        ``슬러그 (Slug)`` -> ``슬러그``
+        ``스토리 앵글`` -> ``스토리앵글``
+    """
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    text = text.replace("\ufeff", "").strip()
+    text = re.sub(r"\([^)]*\)", "", text)
+    text = re.sub(r"\[[^]]*\]", "", text)
+    text = re.sub(r"[\s_\-/]+", "", text)
+    return text.casefold()
+
+
+def matching_header_indexes(headers: list[str], logical_name: str) -> list[int]:
+    alias_keys = {normalize_header_name(alias) for alias in HEADER_ALIASES[logical_name]}
+    return [
+        index
+        for index, header in enumerate(headers)
+        if normalize_header_name(header) in alias_keys
+    ]
+
+
 def connect_sheet() -> tuple[gspread.Worksheet, list[str]]:
     creds_json = json.loads(GOOGLE_CREDENTIALS)
     gc = gspread.service_account_from_dict(creds_json)
     worksheet = gc.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
     headers = worksheet.row_values(1)
+    changed = False
+
     if not headers:
         headers = LEGACY_HEADERS.copy()
-    for required in LEGACY_HEADERS + EXTRA_HEADERS:
-        if required not in headers:
-            headers.append(required)
-    end = column_letter(len(headers))
-    worksheet.update(values=[headers], range_name=f"A1:{end}1")
+        changed = True
+
+    # 기존 시트가 '학명(Scientific Name)', '슬러그 (Slug)', '태그 (Tags)'처럼
+    # 영문 설명을 포함해도 같은 헤더로 인식합니다. 동일 의미의 열을 중복 추가하지 않습니다.
+    for logical_name, aliases in HEADER_ALIASES.items():
+        if not matching_header_indexes(headers, logical_name):
+            headers.append(aliases[0])
+            changed = True
+
+    if changed:
+        end = column_letter(len(headers))
+        worksheet.update(values=[headers], range_name=f"A1:{end}1")
+
+    # 중복 헤더가 이미 생긴 경우에는 원본에 가까운 가장 왼쪽 열을 사용합니다.
+    duplicate_messages: list[str] = []
+    for logical_name in HEADER_ALIASES:
+        indexes = matching_header_indexes(headers, logical_name)
+        if len(indexes) > 1:
+            names = ", ".join(f"{column_letter(i + 1)}열 '{headers[i]}'" for i in indexes)
+            duplicate_messages.append(f"{logical_name}: {names}")
+    if duplicate_messages:
+        log("⚠️ 중복 의미 헤더가 있습니다. 가장 왼쪽 열을 사용합니다: " + " | ".join(duplicate_messages))
+
+    mapping = []
+    for logical_name in HEADER_ALIASES:
+        idx = header_index(headers, logical_name)
+        mapping.append(f"{logical_name}={column_letter(idx + 1)}:{headers[idx]}")
+    log("📋 Google Sheets 헤더 매핑: " + " | ".join(mapping))
     return worksheet, headers
 
 
 def header_index(headers: list[str], logical_name: str) -> int:
-    for alias in HEADER_ALIASES[logical_name]:
-        if alias in headers:
-            return headers.index(alias)
+    indexes = matching_header_indexes(headers, logical_name)
+    if indexes:
+        return indexes[0]
     raise KeyError(f"시트 헤더를 찾을 수 없습니다: {logical_name}")
 
 
