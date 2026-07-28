@@ -51,6 +51,8 @@ jobs:
           GENERATE_AI_BODY_IMAGES: 'true'
           ALLOW_HISTORICAL_BODY_IMAGES: 'false'
           MIN_BODY_IMAGES: '2'
+          BODY_IMAGE_MAX_WIDTH: '720'
+          BODY_IMAGE_MAX_HEIGHT: '520'
           AI_IMAGE_QUALITY: 'medium'
 
           SCHEDULE_TIMEZONE: 'Asia/Seoul'
