@@ -1,261 +1,212 @@
-# TaxonGuru 자동 품질검수 + 예약 발행 파이프라인
+# TaxonGuru 한·영 스토리텔링 자동 예약발행 v4
 
-기존의 `AI 작성 → 즉시 공개` 또는 `초안 생성 → 사람이 매번 승인` 방식 대신 다음 흐름으로 동작합니다.
+이 버전은 하나의 검증 자료 패키지로 **한국어 글과 영어 글을 각각 새로 작성**하고, 두 글을 별도 URL로 예약 발행합니다.
 
-`주제 선택 → 자료 조사 → 출처 구조화 → 한국어 기사 작성 → 1차 자동검수 → 필요 시 자동 재작성 → 2차 자동검수 → 통과 글만 WordPress 예약 → 예약일 자동 공개`
+- 한국어: 기존 일반 게시물 URL
+- 영어: `https://taxonguru.com/en/english-slug/`
+- 한국어 예약: 기본 다음 빈 날짜 오전 9:30 KST
+- 영어 예약: 기본 다음 빈 날짜 오후 6:30 KST
+- 두 언어 모두 별도 품질검사
+- 자동 품질점수와 예약정보는 공개 본문에 표시하지 않고 Google Sheets와 숨은 HTML 주석에만 기록
+- 글 문체는 보고서형이 아니라 카테고리별 과학 스토리텔링형
+- 한국어·영어 페이지 상호 `hreflang` 및 언어 전환 링크 자동 출력
 
-품질 기준을 통과한 글은 Google Sheets에서 `검수자`와 `승인`을 입력하지 않아도 됩니다. 기준을 통과하지 못한 글만 WordPress의 비공개 초안과 시트의 `검수필요` 상태로 남습니다.
+## 중요: WordPress 플러그인을 먼저 설치하세요
 
----
+영문 `/en/` URL과 `hreflang` 연결을 위해 동봉된 플러그인이 필요합니다. Polylang 유료 버전은 필요하지 않습니다.
 
-## 핵심 동작
+설치 파일:
 
-### 자동 예약되는 조건
+```text
+wordpress-plugin/taxonguru-multilingual-bridge.zip
+```
 
-기본 설정은 다음 조건을 모두 만족해야 합니다.
+WordPress 관리자에서 다음 순서로 설치합니다.
 
-- 자동 검수점수 85점 이상
-- 중대한 사실 오류 0건
-- 근거 없는 핵심 주장 0건
-- 유효한 원문 출처 4개 이상
-- 본문 인용 표시 4개 이상
-- 본문 텍스트 2,200자 이상
-- `[[IMAGE_1]]`, `[[IMAGE_2]]` 자리표시자가 정상 생성됨
+```text
+플러그인 → 플러그인 추가 → 플러그인 업로드
+→ taxonguru-multilingual-bridge.zip 선택
+→ 지금 설치 → 활성화
+```
 
-통과하면 WordPress REST API에 다음 값으로 저장합니다.
+활성화 후 아래 주소를 브라우저에서 열었을 때 JSON이 보이면 정상입니다.
 
-- `status`: `future`
-- `date`: 한국시간 기준 예약일
-- `date_gmt`: UTC 기준 예약일
+```text
+https://taxonguru.com/wp-json/taxonguru/v1/status
+```
 
-기준 미달이면 다음 값으로 저장합니다.
+예상 결과:
 
-- `status`: `draft`
-- Google Sheets 상태: `검수필요`
+```json
+{
+  "active": true,
+  "version": "1.0.0",
+  "english_base": "https://taxonguru.com/en/"
+}
+```
 
-### 예약일 계산
+## GitHub에 교체할 파일
 
-기본값은 다음과 같습니다.
-
-- GitHub Actions 실행: 매일 오전 6시 23분 KST
-- 최초 예약일: 실행일 다음 날
-- 공개시간: 오전 9시 30분 KST
-- 발행 간격: 하루 1건
-
-이미 같은 시각의 WordPress 예약글이 있으면 그다음 빈 날짜를 자동으로 찾습니다. 수동으로 workflow를 여러 번 실행해도 같은 시각에 여러 글이 겹치지 않습니다.
-
----
-
-## 저장소에 적용할 파일
-
-저장소 루트에 다음 파일과 폴더를 그대로 업로드하거나 교체합니다.
+ZIP을 압축 해제한 뒤 다음 파일과 폴더를 같은 경로에 덮어씁니다.
 
 ```text
 main.py
-generate_topics.py
-setup_site_pages.py
-audit_existing_posts.py
 requirements.txt
-README.md
 .github/workflows/schedule.yml
-.github/workflows/generate_topics.yml
-.github/workflows/setup_pages.yml
-.github/workflows/audit.yml
 ```
 
----
+나머지 파일은 기존 저장소에 함께 유지해도 됩니다.
 
-## GitHub Secrets
+## 기존 GitHub Secrets와 Variables
 
-`Settings → Secrets and variables → Actions → Secrets`에 다음 값을 설정합니다.
+기존 값을 그대로 사용합니다.
 
-- `WP_USER`
-- `WP_APP_PASSWORD`
-- `GEMINI_API_KEY`
-- `OPENAI_API_KEY` — AI 이미지 기능을 끄면 없어도 됩니다.
-- `GOOGLE_CREDENTIALS`
-- `SHEET_ID`
+### Secrets
 
-## GitHub Variables
-
-`Settings → Secrets and variables → Actions → Variables`에 다음 값을 권장합니다.
-
-- `WP_SITE_URL`: `https://taxonguru.com`
-- `CONTACT_EMAIL`: 실제 문의 이메일
-
----
-
-## schedule.yml 기본 설정
-
-```yaml
-AUTO_SCHEDULE: 'true'
-DRAFT_ON_REVIEW_FAILURE: 'true'
-ALLOW_AI_FEATURED_IMAGE: 'false'
-
-SCHEDULE_TIMEZONE: 'Asia/Seoul'
-PUBLISH_HOUR: '9'
-PUBLISH_MINUTE: '30'
-SCHEDULE_AFTER_DAYS: '1'
-SCHEDULE_INTERVAL_DAYS: '1'
-MIN_SCHEDULE_LEAD_MINUTES: '30'
-MAX_SCHEDULE_LOOKAHEAD_DAYS: '120'
-
-MIN_SOURCE_COUNT: '4'
-MIN_QUALITY_SCORE: '85'
-MIN_ARTICLE_CHARS: '2200'
-MIN_CITATION_MARKERS: '4'
+```text
+WP_USER
+WP_APP_PASSWORD
+GEMINI_API_KEY
+OPENAI_API_KEY
+GOOGLE_CREDENTIALS
+SHEET_ID
 ```
 
-### 예약시간 변경 예시
+`OPENAI_API_KEY`는 `ALLOW_AI_FEATURED_IMAGE=false`인 동안 필수는 아닙니다.
 
-매일 오후 7시에 발행하려면 다음 두 값만 바꿉니다.
+### Variables
 
-```yaml
-PUBLISH_HOUR: '19'
-PUBLISH_MINUTE: '0'
+```text
+WP_SITE_URL=https://taxonguru.com
+CONTACT_EMAIL=실제 문의 이메일
 ```
 
-작성 당일 예약하려면 다음과 같이 바꿀 수 있습니다.
+## 자동 처리 흐름
 
-```yaml
-SCHEDULE_AFTER_DAYS: '0'
+```text
+Google Sheets 대기 주제 1건
+→ 공통 연구자료 조사
+→ 한국어 스토리텔링 기사 작성
+→ 한국어 자동검수 및 필요 시 1회 재작성
+→ 영어권 독자를 위한 영어 기사 별도 작성
+→ 영어 자동검수 및 필요 시 1회 재작성
+→ Commons 이미지 업로드 및 언어별 캡션 적용
+→ 한국어 오전 9:30 예약
+→ 영어 오후 6:30 예약
+→ 두 게시물 번역 관계 연결
+→ hreflang와 언어 전환 링크 자동 출력
 ```
 
-다만 설정한 발행시각이 이미 지났거나 현재 시각에서 30분 이내이면 다음 예약일로 자동 이동합니다.
+영어 글은 한국어 글을 직역하지 않고 같은 연구자료를 바탕으로 영어권 독자에게 맞게 다시 작성합니다.
 
-### 발행 빈도 변경
+## 공개 본문에서 제거된 내용
 
-이틀에 한 번 예약하려면 다음처럼 설정합니다.
+이전 버전에 있던 다음 문구는 더 이상 방문자에게 표시되지 않습니다.
 
-```yaml
-SCHEDULE_INTERVAL_DAYS: '2'
+```text
+자동 품질검사 통과
+출처 6개와 자동 검수점수 96점을 확인하여 예약되었습니다.
 ```
 
-GitHub Actions 자체 실행 빈도도 바꾸려면 `.github/workflows/schedule.yml`의 cron을 변경합니다. 현재 값은 매일 오전 6시 23분 KST입니다.
+검수점수, 출처 수, 예약일, 수정 권고는 Google Sheets에만 기록되고 게시물 HTML에는 보이지 않는 주석으로 보관됩니다.
 
-```yaml
-- cron: '23 21 * * *'
+## 글쓰기 스타일
+
+카테고리별로 구조와 분위기를 달리합니다.
+
+- `Extreme Survivors`: 극한 환경의 장면에서 시작하는 자연 다큐멘터리형
+- `Evolution Mysteries`: 오해와 증거를 하나씩 검증하는 과학 탐정형
+- `Size Lab`: 익숙한 대상과 크기를 비교하는 실험형
+- `Botany`: 서식지 풍경과 계절감에서 시작하는 자연 관찰 에세이형
+
+공통적으로 짧은 문단, 자연스러운 비유, 절제된 유머, 장면형 도입을 사용합니다. 사실검증과 출처 번호는 그대로 유지합니다.
+
+## 품질 기준
+
+한국어와 영어를 별도로 검사합니다.
+
+```text
+품질점수 85점 이상
+유효 출처 4개 이상
+인용표시 4개 이상
+한국어 본문 2,200자 이상
+영어 본문 850단어 이상
+중대한 사실 오류 0건
+근거 없는 핵심 주장 0건
+각 페이지에 다른 언어가 과도하게 섞이지 않음
 ```
 
-GitHub Actions cron은 UTC 기준이므로 위 값은 한국시간으로 다음 날 오전 6시 23분입니다.
+영어 글만 실패하면 한국어는 예약되고 영어는 초안으로 저장됩니다.
 
----
+## Google Sheets에 추가되는 영문 관리 열
 
-## Google Sheets 상태값
+코드가 없는 열을 자동 추가하고 시트 그리드도 자동 확장합니다.
 
-코드가 기존 열 뒤에 필요한 열을 자동 추가합니다.
-
-### 상태
-
-- `대기`: 새 글 작성 대상
-- `조사중`: 원문 자료와 분류 정보 수집 중
-- `작성중`: 기사 본문 작성 중
-- `자동검수중`: 자동 사실·품질 검사 중
-- `예약완료`: WordPress 예약글 등록 완료
-- `완료`: WordPress에서 실제 공개 완료
-- `검수필요`: 자동 기준 미달로 비공개 초안 저장
-- `자료부족`: 신뢰할 수 있는 자료 또는 검증 사실 부족
-- `재작성`: 같은 주제를 다시 작성하도록 요청
-- `검수실패`: 설정상 초안 저장을 끈 상태에서 품질검사 실패
-- `오류`: API, 인증, WordPress 처리 등의 실행 오류
-- `보류`: 자동 처리 대상에서 제외
-
-### 추가 열
-
-- `WP_POST_ID`
-- `편집URL`
-- `공개URL`
-- `품질점수`
-- `자료수`
-- `예약일`
-- `자동검수결과`
-- `오류`
-
-기존의 `검수자`, `검수일`, `검수메모` 열은 호환성을 위해 남겨두지만 자동 예약에는 필수로 사용하지 않습니다.
-
----
-
-## 실제 운영 순서
-
-1. Google Sheets의 주제 상태를 `대기`로 둡니다.
-2. GitHub Actions의 `TaxonGuru Scheduled Auto-Publish`가 매일 자동 실행됩니다.
-3. 글이 기준을 통과하면 시트 상태가 `예약완료`로 바뀌고 `예약일`이 기록됩니다.
-4. 예약일이 되면 WordPress가 글을 공개합니다.
-5. 다음 workflow 실행 때 WordPress 상태를 확인해 시트 상태를 `완료`로 동기화합니다.
-6. 기준 미달 글만 `검수필요`로 남으므로 필요할 때만 확인합니다.
-
-글마다 `검수자` 이름을 입력하거나 상태를 `승인`으로 바꿀 필요가 없습니다.
-
----
-
-## WordPress 필수 확인
-
-### 사이트 시간대
-
-WordPress 관리자에서 다음 위치를 확인합니다.
-
-`설정 → 일반 → 시간대 → 서울`
-
-코드는 `date`와 `date_gmt`를 모두 전송하지만, 관리자 화면과 예약시간을 일치시키기 위해 사이트 시간대를 서울로 설정하는 것이 좋습니다.
-
-### 예약 발행 지연 방지
-
-WordPress의 WP-Cron은 사이트 방문 요청을 계기로 동작할 수 있으므로 방문자가 적으면 예약 발행이 늦어질 수 있습니다. 호스팅에서 실제 Cron을 지원하면 5분 간격 실행을 권장합니다.
-
-```bash
-*/5 * * * * curl -s https://taxonguru.com/wp-cron.php?doing_wp_cron >/dev/null 2>&1
+```text
+EN_POST_ID
+EN_편집URL
+EN_공개URL
+EN_품질점수
+EN_예약일
+EN_자동검수결과
+한영연결
+영문오류
 ```
 
-호스팅 환경에 따라 `wget`을 사용할 수도 있습니다.
+기존 `WP_POST_ID`, `편집URL`, `공개URL`, `품질점수`, `예약일`은 한국어 글을 의미합니다.
 
-```bash
-*/5 * * * * wget -q -O - https://taxonguru.com/wp-cron.php?doing_wp_cron >/dev/null 2>&1
+## 상태값
+
+```text
+대기
+조사중
+한국어작성
+영어작성
+한영예약완료
+한국어예약/영문검수필요
+검수필요
+자료부족
+오류
+완료
 ```
 
-서버 Cron을 설정했다면 WordPress 설정에 따라 기본 WP-Cron 비활성화 여부를 호스팅 업체 안내에 맞춰 결정하십시오.
+## 현재 예약된 기존 글을 새 버전으로 다시 만들기
 
----
+이미 예약된 글에는 이전 버전의 `자동 품질검사 통과` 상자가 남아 있습니다. 해당 행의 상태를 다음으로 바꾼 뒤 새 코드를 실행하면 같은 슬러그의 예약글을 갱신합니다.
 
-## 이미지 처리
+```text
+재작성
+```
 
-- Wikimedia Commons의 CC BY, CC BY-SA, CC0, Public Domain 이미지를 우선합니다.
-- 저작자, 라이선스, 원본 파일 링크를 WordPress 캡션과 미디어 설명에 기록합니다.
-- 비상업적 전용, 변경금지, 불명확한 라이선스는 자동 제외합니다.
-- `ALLOW_AI_FEATURED_IMAGE` 기본값은 `false`입니다.
-- AI 이미지를 켜면 실제 관찰 사진이 아닌 설명용 이미지라는 캡션을 자동으로 붙입니다.
+현재 예약글을 직접 편집해 상자만 삭제할 수도 있지만, 스토리텔링 문체와 영어판까지 함께 적용하려면 `재작성`을 권장합니다.
 
----
+## 첫 실행 순서
 
-## 운영 페이지 생성
+1. WordPress에 `TaxonGuru Multilingual Bridge` 설치 및 활성화
+2. GitHub에 새 `main.py`, `requirements.txt`, `schedule.yml` 업로드
+3. Google Sheets의 테스트 행 상태를 `대기` 또는 `재작성`으로 설정
+4. GitHub `Actions → TaxonGuru Bilingual Story Auto-Publish → Run workflow`
+5. 로그에서 다음 항목 확인
 
-GitHub Actions에서 `Create Editorial Pages`를 수동 실행하면 다음 페이지를 WordPress 초안으로 생성합니다.
+```text
+다국어 브리지 확인
+한국어 자동 검수
+영어 자동 검수
+한국어 예약
+영어 예약
+한·영 예약 완료
+```
 
-- TaxonGuru 소개
-- 편집 및 팩트체크 정책
-- AI 활용 정책
-- 문의 및 오류 제보
-- 개인정보처리방침
+6. WordPress `글 → 모든 글 → 예약됨`에서 한국어와 영어 글 2건 확인
+7. 영어 글의 공개주소가 `/en/`으로 시작하는지 확인
 
-자동 운영 사실을 숨기지 않도록 정책 페이지에는 자동 검수와 예약 발행, 사람의 개별 검수가 항상 수행되는 것은 아니라는 설명이 포함됩니다. 실제 운영 방식과 개인정보·광고 설정에 맞게 확인한 뒤 공개하십시오.
+## 검색엔진 다국어 원칙
 
----
+Google은 한 페이지에 번역을 나란히 붙이는 방식보다 언어별 별도 URL과 양방향 `hreflang` 사용을 권장합니다.
 
-## 기존 글 감사
+- https://developers.google.com/search/docs/specialty/international/managing-multi-regional-sites
+- https://developers.google.com/search/docs/specialty/international/localized-versions
 
-`Audit Existing Posts` workflow를 실행하면 `taxonguru_content_audit.csv`가 GitHub Actions Artifacts로 생성됩니다.
+## 참고
 
-확인 항목:
-
-- 본문 분량
-- 외부 원문 링크 수
-- 참고자료 섹션
-- 이미지 라이선스 표기
-- 고정 5단 템플릿 흔적
-- 한 페이지의 한국어·영어 반복
-- AI 활용 고지
-
----
-
-## 주의사항
-
-이 코드는 저품질 글의 즉시 공개를 막고, 기준을 통과한 글만 예약하도록 설계한 자동화입니다. 그러나 자동 품질점수와 출처 개수만으로 과학적 정확성이나 애드센스 승인이 보장되지는 않습니다. `검수필요`, `자료부족`, 오류 제보가 발생한 글은 사람이 확인하고, 공개된 글도 정기적으로 표본 점검하는 것이 안전합니다.
+자동화 구조를 개선해도 애드센스 승인을 보장하지는 않습니다. 기존 저품질 게시물 정리, 사이트 소개·편집정책·개인정보처리방침, 이미지 라이선스, 사용자 탐색 구조도 함께 점검해야 합니다.
