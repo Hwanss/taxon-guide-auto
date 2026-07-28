@@ -18,25 +18,24 @@ on:
           - new
           - status_only
       legacy_batch_size:
-        description: '기존 완료 글 회당 처리 건수'
+        description: '기존 완료 글 회당 감사 건수'
         required: true
-        default: '2'
+        default: '1'
         type: choice
         options:
           - '1'
           - '2'
           - '3'
-          - '4'
       force_new_now:
-        description: '신규 단계에서 시간대와 관계없이 1건 즉시 실행'
+        description: '기존 정리 완료 후 신규 글 1건 즉시 실행'
         required: true
         default: false
         type: boolean
   schedule:
-    # 한국시간 매일 03:17, 15:17
-    # 기존 정리 중에는 회당 2건씩 하루 4건 처리합니다.
-    # 기존 정리 완료 후 신규 작성은 오전 실행에서만 하루 1건 진행합니다.
-    - cron: '17 18,6 * * *'
+    # 한국시간 03:17, 09:17, 15:17, 21:17
+    # 기존 정리 중에는 감사→재작성→다음 빈 순번 예약을 자동 반복합니다.
+    # 기존 정리 완료 뒤 신규 글은 03:17 실행에서만 하루 1건 작성합니다.
+    - cron: '17 18,0,6,12 * * *'
 
 jobs:
   master-pipeline:
@@ -75,18 +74,17 @@ jobs:
           SHEET_NAME: 'taxonguru'
           CONTROL_SHEET_NAME: '파이프라인상태'
           LEGACY_TARGET_STATUS: '완료'
-          LEGACY_BATCH_SIZE: ${{ github.event.inputs.legacy_batch_size || '2' }}
+          LEGACY_BATCH_SIZE: ${{ github.event.inputs.legacy_batch_size || '1' }}
           FORCE_PHASE: ${{ github.event.inputs.force_phase || 'auto' }}
           FORCE_NEW_NOW: ${{ github.event.inputs.force_new_now || 'false' }}
+          MAX_LEGACY_REWRITE_ATTEMPTS: '3'
 
-          # 기존 글 정리가 끝난 뒤 적용되는 신규 운영 설정
           TOPIC_REFILL_THRESHOLD: '10'
           TOPIC_REFILL_COUNT: '12'
           NEW_WINDOW_START_HOUR: '2'
           NEW_WINDOW_END_HOUR: '7'
           SCHEDULE_TIMEZONE: 'Asia/Seoul'
 
-          # 공통 품질/연결 설정
           FORCE_IPV4: 'true'
           WP_CONNECT_RETRIES: '5'
           WP_CONNECT_RETRY_DELAY: '3'
@@ -101,6 +99,7 @@ jobs:
           PREFER_AI_FEATURED_IMAGE: 'true'
           GENERATE_AI_BODY_IMAGES: 'true'
           MIN_BODY_IMAGES: '2'
+          QUEUE_GRADE_D_FOR_REWRITE: 'true'
           AUDIT_OUTPUT_DIR: 'audit_output'
         run: python pipeline_controller.py
 
