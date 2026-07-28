@@ -1,0 +1,29 @@
+name: Create Editorial Pages
+
+on:
+  workflow_dispatch:
+
+jobs:
+  create-pages:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create pages as drafts
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
+          SITE_PAGES_STATUS: draft
+        run: python setup_site_pages.py

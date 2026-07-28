@@ -1,39 +1,60 @@
-name: Daily Blog Auto-Publish
+name: TaxonGuru Scheduled Auto-Publish
 
 concurrency:
-  group: taxon-blog-publishing
+  group: taxon-blog-scheduled-pipeline
   cancel-in-progress: false
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '15 0,9 * * *'
+    # 매일 06:23 KST 실행. GitHub cron은 UTC이므로 전날 21:23 UTC입니다.
+    # 실행 시 글 1건을 작성·자동검수하고, 통과한 글은 다음 빈 날짜 09:30 KST로 예약합니다.
+    - cron: '23 21 * * *'
 
 jobs:
-  publish-blog:
+  scheduled-publisher:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    # 🔥 파이썬 3.12 최신 버전으로 업그레이드 (경고 제거)
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
 
-    # 🔥 최신 제미나이 패키지(google-genai)로 교체
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install requests openai google-genai gspread
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: Run Blog Publisher
-      env:
-        WP_USER: ${{ secrets.WP_USER }}
-        WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-        SHEET_ID: ${{ secrets.SHEET_ID }}
-      run: python main.py
+      - name: Create and schedule one article
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
+
+          AUTO_SCHEDULE: 'true'
+          DRAFT_ON_REVIEW_FAILURE: 'true'
+          ALLOW_AI_FEATURED_IMAGE: 'false'
+
+          SCHEDULE_TIMEZONE: 'Asia/Seoul'
+          PUBLISH_HOUR: '9'
+          PUBLISH_MINUTE: '30'
+          SCHEDULE_AFTER_DAYS: '1'
+          SCHEDULE_INTERVAL_DAYS: '1'
+          MIN_SCHEDULE_LEAD_MINUTES: '30'
+          MAX_SCHEDULE_LOOKAHEAD_DAYS: '120'
+
+          MIN_SOURCE_COUNT: '4'
+          MIN_QUALITY_SCORE: '85'
+          MIN_ARTICLE_CHARS: '2200'
+          MIN_CITATION_MARKERS: '4'
+        run: python main.py
