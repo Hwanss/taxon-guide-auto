@@ -1,39 +1,15 @@
-name: TaxonGuru Topic Planner (PAUSED)
+name: TaxonGuru Topic Planner (CONTROLLED)
 
-# 감사 기간에는 자동 주제 추가 cron을 제거했습니다.
+# 대기 주제가 10건 미만일 때 마스터 파이프라인이 자동 실행합니다.
+# 평상시 사용자가 직접 실행할 필요가 없습니다.
 on:
   workflow_dispatch:
-    inputs:
-      run_planner:
-        description: '새 주제를 시트에 추가합니다'
-        required: true
-        default: false
-        type: boolean
 
 jobs:
-  paused-notice:
-    if: ${{ !inputs.run_planner }}
+  controlled-notice:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "주제 자동 추가는 일시 중지 상태입니다."
-
-  manual-topic-planner:
-    if: ${{ inputs.run_planner }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: pip
-      - run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      - name: Generate validated topics manually
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-          SHEET_ID: ${{ secrets.SHEET_ID }}
-          TOPIC_COUNT: '8'
-        run: python generate_topics.py
+      - name: Controlled by master pipeline
+        run: |
+          echo "주제 생성은 마스터 파이프라인이 대기 목록 수를 확인해 자동 실행합니다."
+          echo "TaxonGuru Master Cleanup & Publish만 사용하세요."

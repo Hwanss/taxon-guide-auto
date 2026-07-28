@@ -1,51 +1,50 @@
-name: TaxonGuru Content Audit & Repair
+name: TaxonGuru Master Cleanup & Publish
 
 concurrency:
-  group: taxonguru-content-audit-repair
+  group: taxonguru-master-pipeline
   cancel-in-progress: false
 
 on:
   workflow_dispatch:
     inputs:
-      mode:
-        description: '실행 방식'
+      force_phase:
+        description: '자동 운영 단계 강제 선택'
         required: true
-        default: 'report_only'
+        default: 'auto'
         type: choice
         options:
-          - report_only
-          - safe_fix
-          - rewrite_recent
-      batch_size:
-        description: '최근 게시물 처리 건수(처음에는 1~3 권장)'
+          - auto
+          - cleanup
+          - new
+          - status_only
+      legacy_batch_size:
+        description: '기존 완료 글 회당 처리 건수'
         required: true
-        default: '3'
+        default: '2'
         type: choice
         options:
           - '1'
+          - '2'
           - '3'
-          - '5'
-          - '10'
-      include_already_audited:
-        description: '이미 감사한 게시물도 다시 처리'
+          - '4'
+      force_new_now:
+        description: '신규 단계에서 시간대와 관계없이 1건 즉시 실행'
         required: true
         default: false
         type: boolean
-      create_english:
-        description: 'rewrite_recent에서 별도 영어 글도 작성'
-        required: true
-        default: true
-        type: boolean
-      draft_grade_d:
-        description: 'D등급을 자동 초안 전환(처음에는 끄기 권장)'
-        required: true
-        default: false
-        type: boolean
+  schedule:
+    # 한국시간 매일 03:17, 15:17
+    # 기존 정리 중에는 회당 2건씩 하루 4건 처리합니다.
+    # 기존 정리 완료 후 신규 작성은 오전 실행에서만 하루 1건 진행합니다.
+    - cron: '17 18,6 * * *'
 
 jobs:
-  audit-repair:
+  master-pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 360
+    permissions:
+      contents: read
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -62,35 +61,54 @@ jobs:
           pip install --upgrade -r requirements.txt
           python -c "import importlib.metadata as m; print('google-genai=' + m.version('google-genai'))"
 
-      - name: Audit and optionally repair recent posts
+      - name: Run master controller
         env:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
           CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
 
-          AUDIT_MODE: ${{ inputs.mode }}
-          AUDIT_BATCH_SIZE: ${{ inputs.batch_size }}
-          INCLUDE_ALREADY_AUDITED: ${{ inputs.include_already_audited }}
-          AUDIT_CREATE_ENGLISH: ${{ inputs.create_english }}
-          AUDIT_DRAFT_GRADE_D: ${{ inputs.draft_grade_d }}
-          AUDIT_INCLUDE_ENGLISH_POSTS: 'false'
+          SHEET_NAME: 'taxonguru'
+          CONTROL_SHEET_NAME: '파이프라인상태'
+          LEGACY_TARGET_STATUS: '완료'
+          LEGACY_BATCH_SIZE: ${{ github.event.inputs.legacy_batch_size || '2' }}
+          FORCE_PHASE: ${{ github.event.inputs.force_phase || 'auto' }}
+          FORCE_NEW_NOW: ${{ github.event.inputs.force_new_now || 'false' }}
 
+          # 기존 글 정리가 끝난 뒤 적용되는 신규 운영 설정
+          TOPIC_REFILL_THRESHOLD: '10'
+          TOPIC_REFILL_COUNT: '12'
+          NEW_WINDOW_START_HOUR: '2'
+          NEW_WINDOW_END_HOUR: '7'
+          SCHEDULE_TIMEZONE: 'Asia/Seoul'
+
+          # 공통 품질/연결 설정
+          FORCE_IPV4: 'true'
+          WP_CONNECT_RETRIES: '5'
+          WP_CONNECT_RETRY_DELAY: '3'
+          REQUEST_TIMEOUT: '45'
           MIN_SOURCE_COUNT: '4'
           MIN_QUALITY_SCORE: '85'
           BODY_IMAGE_MAX_WIDTH: '720'
           BODY_IMAGE_MAX_HEIGHT: '520'
+          ENABLE_ENGLISH: 'true'
+          AUTO_SCHEDULE: 'true'
+          ALLOW_AI_FEATURED_IMAGE: 'true'
+          PREFER_AI_FEATURED_IMAGE: 'true'
+          GENERATE_AI_BODY_IMAGES: 'true'
+          MIN_BODY_IMAGES: '2'
           AUDIT_OUTPUT_DIR: 'audit_output'
-        run: python audit_existing_posts.py
+        run: python pipeline_controller.py
 
-      - name: Upload reports and original backups
+      - name: Upload audit reports and backups
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: taxonguru-content-audit-${{ github.run_number }}
+          name: taxonguru-master-${{ github.run_number }}
           path: audit_output/
-          if-no-files-found: warn
+          if-no-files-found: ignore
           retention-days: 30
