@@ -29,7 +29,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-WP_SITE_URL = os.getenv("WP_SITE_URL", "https://taxonguru.com").rstrip("/")
+WP_SITE_URL = os.getenv("WP_SITE_URL", "https://taxonguru.com").strip().rstrip("/")
 WP_URL = f"{WP_SITE_URL}/wp-json/wp/v2"
 WP_USER = os.environ["WP_USER"]
 WP_APP_PASSWORD = os.environ["WP_APP_PASSWORD"]
@@ -52,6 +52,9 @@ MIN_ENGLISH_WORDS = int(os.getenv("MIN_ENGLISH_WORDS", "850"))
 MIN_CITATION_MARKERS = int(os.getenv("MIN_CITATION_MARKERS", "4"))
 ENABLE_ENGLISH = os.getenv("ENABLE_ENGLISH", "true").lower() == "true"
 MULTILINGUAL_BACKEND = os.getenv("MULTILINGUAL_BACKEND", "taxonguru_bridge")
+BRIDGE_PREFLIGHT_STRICT = os.getenv("BRIDGE_PREFLIGHT_STRICT", "false").lower() == "true"
+BRIDGE_CHECK_RETRIES = max(1, int(os.getenv("BRIDGE_CHECK_RETRIES", "3")))
+BRIDGE_RETRY_DELAY_SECONDS = max(0.5, float(os.getenv("BRIDGE_RETRY_DELAY_SECONDS", "2")))
 ALLOW_AI_FEATURED_IMAGE = os.getenv("ALLOW_AI_FEATURED_IMAGE", "true").lower() == "true"
 PREFER_AI_FEATURED_IMAGE = os.getenv("PREFER_AI_FEATURED_IMAGE", "true").lower() == "true"
 GENERATE_AI_BODY_IMAGES = os.getenv("GENERATE_AI_BODY_IMAGES", "true").lower() == "true"
@@ -719,6 +722,93 @@ def wp_root_request(method: str, endpoint: str, **kwargs: Any) -> requests.Respo
     return response
 
 
+def _bridge_request(
+    method: str,
+    endpoint: str,
+    *,
+    authenticated: bool,
+    json_payload: dict[str, Any] | None = None,
+) -> requests.Response:
+    """Call the bridge route through both common WordPress REST URL forms.
+
+    Some security or cache layers intermittently reject Basic Auth on a public
+    endpoint or only allow the rest_route query form. Trying both forms avoids
+    treating a temporary REST routing issue as a deactivated plugin.
+    """
+    clean = endpoint.strip("/")
+    candidates: list[tuple[str, dict[str, str] | None]] = [
+        (f"{WP_SITE_URL}/wp-json/{clean}", None),
+        (f"{WP_SITE_URL}/", {"rest_route": f"/{clean}"}),
+    ]
+    auth_candidates: list[tuple[str, tuple[str, str] | None]]
+    if authenticated:
+        auth_candidates = [("auth", wp_auth)]
+    else:
+        # The status route is public. Test it without credentials first because
+        # a WAF can reject an unnecessary Authorization header.
+        auth_candidates = [("public", None), ("auth", wp_auth)]
+
+    errors: list[str] = []
+    for attempt in range(1, BRIDGE_CHECK_RETRIES + 1):
+        for url, params in candidates:
+            for auth_label, auth_value in auth_candidates:
+                try:
+                    response = session.request(
+                        method,
+                        url,
+                        params=params,
+                        json=json_payload,
+                        auth=auth_value,
+                        timeout=REQUEST_TIMEOUT,
+                        allow_redirects=True,
+                    )
+                except requests.RequestException as exc:
+                    errors.append(f"{auth_label} {url}: {type(exc).__name__}: {exc}")
+                    continue
+
+                if response.status_code < 400:
+                    return response
+
+                body = re.sub(r"\s+", " ", response.text or "").strip()[:240]
+                errors.append(
+                    f"{auth_label} {response.url}: HTTP {response.status_code}"
+                    + (f" · {body}" if body else "")
+                )
+
+        if attempt < BRIDGE_CHECK_RETRIES:
+            time.sleep(BRIDGE_RETRY_DELAY_SECONDS * attempt)
+
+    detail = " | ".join(errors[-8:]) if errors else "응답 없음"
+    raise RuntimeError(f"TaxonGuru Bridge REST 요청 실패: {detail}")
+
+
+def _bridge_namespace_visible() -> bool:
+    candidates: list[tuple[str, dict[str, str] | None]] = [
+        (f"{WP_SITE_URL}/wp-json/", None),
+        (f"{WP_SITE_URL}/", {"rest_route": "/"}),
+    ]
+    for url, params in candidates:
+        try:
+            response = session.get(
+                url,
+                params=params,
+                timeout=REQUEST_TIMEOUT,
+                allow_redirects=True,
+            )
+            if response.status_code >= 400:
+                continue
+            payload = response.json()
+            namespaces = payload.get("namespaces", []) if isinstance(payload, dict) else []
+            if "taxonguru/v1" in namespaces:
+                return True
+            routes = payload.get("routes", {}) if isinstance(payload, dict) else {}
+            if any(str(route).startswith("/taxonguru/v1/") for route in routes):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def ensure_multilingual_backend() -> None:
     if not ENABLE_ENGLISH:
         return
@@ -727,26 +817,104 @@ def ensure_multilingual_backend() -> None:
             "현재 패키지는 MULTILINGUAL_BACKEND=taxonguru_bridge를 지원합니다. "
             "동봉된 TaxonGuru Multilingual Bridge 플러그인을 설치·활성화하세요."
         )
+
     try:
-        payload = wp_root_request("GET", "taxonguru/v1/status").json()
+        response = _bridge_request(
+            "GET",
+            "taxonguru/v1/status",
+            authenticated=False,
+        )
+        payload = response.json()
+        if not isinstance(payload, dict) or not payload.get("active"):
+            raise RuntimeError(f"예상하지 못한 상태 응답: {str(payload)[:300]}")
+        log(
+            f"🌐 다국어 브리지 확인: {payload.get('version', 'unknown')} · "
+            f"{payload.get('english_base', '')}"
+        )
+        return
     except Exception as exc:
-        raise RuntimeError(
-            "영문 /en/ URL과 hreflang 연결에 필요한 'TaxonGuru Multilingual Bridge' 플러그인이 "
-            "설치 또는 활성화되지 않았습니다. wordpress-plugin/taxonguru-multilingual-bridge.zip을 "
-            "워드프레스 플러그인에서 설치한 뒤 다시 실행하세요."
-        ) from exc
-    if not payload.get("active"):
-        raise RuntimeError("TaxonGuru Multilingual Bridge 플러그인 상태를 확인할 수 없습니다.")
-    log(f"🌐 다국어 브리지 확인: {payload.get('version', 'unknown')} · {payload.get('english_base', '')}")
+        if _bridge_namespace_visible():
+            log(
+                "🌐 다국어 브리지 네임스페이스는 확인됐지만 status 경로 응답이 불안정합니다. "
+                f"게시물 메타 연결 방식으로 계속 진행합니다: {_short_error(exc)}"
+            )
+            return
+        if BRIDGE_PREFLIGHT_STRICT:
+            raise RuntimeError(
+                "TaxonGuru Multilingual Bridge 상태 확인에 실패했습니다. "
+                "플러그인 활성화 여부와 REST API 차단 설정을 확인하세요. "
+                f"상세: {_short_error(exc)}"
+            ) from exc
+        log(
+            "⚠️ 다국어 브리지 사전 확인을 완료하지 못했습니다. "
+            "일시적인 보안·캐시·REST 경로 문제일 수 있어 게시물 생성은 계속 진행하고, "
+            "최종 연결 단계에서 WordPress 게시물 메타 방식으로 다시 확인합니다. "
+            f"상세: {_short_error(exc)}"
+        )
 
 
 def link_translation_posts(ko_post_id: int, en_post_id: int) -> dict[str, Any]:
-    response = wp_root_request(
-        "POST",
-        "taxonguru/v1/link-translations",
-        json={"ko_post_id": ko_post_id, "en_post_id": en_post_id},
-    )
-    return response.json()
+    payload = {"ko_post_id": ko_post_id, "en_post_id": en_post_id}
+    try:
+        response = _bridge_request(
+            "POST",
+            "taxonguru/v1/link-translations",
+            authenticated=True,
+            json_payload=payload,
+        )
+        result = response.json()
+        if isinstance(result, dict) and result.get("linked"):
+            return result
+        raise RuntimeError(f"예상하지 못한 연결 응답: {str(result)[:300]}")
+    except Exception as route_error:
+        # The bridge route can be hidden by a WAF even while the plugin's REST
+        # post meta is active. Link the pair through the core posts endpoint.
+        log(
+            "  ⚠️ 브리지 전용 연결 경로를 사용할 수 없어 WordPress 게시물 메타 방식으로 전환합니다: "
+            f"{_short_error(route_error)}"
+        )
+        try:
+            ko_post = wp_request(
+                "POST",
+                f"posts/{ko_post_id}",
+                json={
+                    "meta": {
+                        "_taxonguru_language": "ko",
+                        "_taxonguru_translation_id": en_post_id,
+                    }
+                },
+            ).json()
+            en_post = wp_request(
+                "POST",
+                f"posts/{en_post_id}",
+                json={
+                    "meta": {
+                        "_taxonguru_language": "en",
+                        "_taxonguru_translation_id": ko_post_id,
+                    }
+                },
+            ).json()
+        except Exception as meta_error:
+            raise RuntimeError(
+                "다국어 브리지 전용 경로와 WordPress 게시물 메타 연결이 모두 실패했습니다. "
+                "플러그인이 실제로 활성화되어 있는지, WordPress REST API 또는 애플리케이션 비밀번호가 "
+                "보안 플러그인·호스팅 방화벽에 의해 차단되는지 확인하세요. "
+                f"전용 경로: {_short_error(route_error)} · 메타 경로: {_short_error(meta_error)}"
+            ) from meta_error
+
+        ko_url = str(ko_post.get("link", ""))
+        en_url = str(en_post.get("link", ""))
+        if not en_url or "/en/" not in en_url:
+            en_slug = str(en_post.get("slug", "")).strip("/")
+            en_url = f"{WP_SITE_URL}/en/{en_slug}/" if en_slug else en_url
+        return {
+            "linked": True,
+            "method": "core_post_meta",
+            "ko_post_id": ko_post_id,
+            "en_post_id": en_post_id,
+            "ko_url": ko_url,
+            "en_url": en_url,
+        }
 
 
 def get_or_create_wp_term(term_name: str, taxonomy: str) -> int | None:
