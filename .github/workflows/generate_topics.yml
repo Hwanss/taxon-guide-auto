@@ -1,31 +1,36 @@
-name: TaxonGuru Topic Planner
+name: TaxonGuru Topic Planner (PAUSED)
 
+# 감사 기간에는 자동 주제 추가 cron을 제거했습니다.
 on:
   workflow_dispatch:
-  schedule:
-    # 매월 첫 번째 월요일 09:00 KST
-    - cron: '0 0 1-7 * 1'
+    inputs:
+      run_planner:
+        description: '새 주제를 시트에 추가합니다'
+        required: true
+        default: false
+        type: boolean
 
 jobs:
-  plan-topics:
+  paused-notice:
+    if: ${{ !inputs.run_planner }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "주제 자동 추가는 일시 중지 상태입니다."
+
+  manual-topic-planner:
+    if: ${{ inputs.run_planner }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: pip
-
-      - name: Install dependencies
-        run: |
+      - run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      - name: Generate validated topics
+      - name: Generate validated topics manually
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
