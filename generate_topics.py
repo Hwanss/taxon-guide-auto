@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
-import warnings
-from typing import Literal
+import time
+from typing import Any
 
 import gspread
 import requests
@@ -12,174 +13,193 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
-warnings.filterwarnings("ignore", category=FutureWarning)
-
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 GOOGLE_CREDENTIALS = os.environ["GOOGLE_CREDENTIALS"]
 SHEET_ID = os.environ["SHEET_ID"]
 SHEET_NAME = os.getenv("SHEET_NAME", "taxonguru")
-TOPIC_MODEL = os.getenv("GEMINI_TOPIC_MODEL", "gemini-3.5-flash-lite")
-TOPIC_COUNT = int(os.getenv("TOPIC_COUNT", "8"))
+TOPIC_COUNT = max(1, min(30, int(os.getenv("TOPIC_COUNT", "12"))))
+MODEL = os.getenv("GEMINI_TOPIC_MODEL", "gemini-3.6-flash")
+REQUEST_TIMEOUT = max(15, int(os.getenv("REQUEST_TIMEOUT", "45")))
 
-client = genai.Client(api_key=GEMINI_API_KEY)
-session = requests.Session()
-session.headers.update({"User-Agent": "TaxonGuruTopicPlanner/2.0 (admin@taxonguru.com)"})
-
-REQUIRED_HEADERS = [
-    "상태", "학명", "국문/영문명", "분류 트리", "카테고리", "스토리앵글", "슬러그", "태그",
-    "검수자", "검수일", "검수메모", "언어", "WP_POST_ID", "편집URL", "공개URL", "품질점수", "자료수", "예약일", "자동검수결과", "오류",
+CATEGORY_VALUES = [
+    "Botany / 식물학",
+    "Evolution Mysteries / 진화의 미스터리",
+    "Extreme Survivors / 극한의 생존자",
+    "Size Lab / 크기 비교 연구소",
 ]
 
 
-class Topic(BaseModel):
-    scientific_name: str = ""
-    title_ko: str = ""
-    common_name_en: str = ""
-    taxonomy_hint: str = ""
-    category: Literal[
-        "Botany / 식물학",
-        "Evolution Mysteries / 진화의 미스터리",
-        "Extreme Survivors / 극한의 생존자",
-        "Size Lab / 크기 비교 연구소",
-    ]
-    research_question: str = ""
-    slug: str = ""
+class TopicCandidate(BaseModel):
+    scientific_name: str
+    display_title: str
+    taxonomy: str
+    category: str
+    story_angle: str
+    slug: str
     tags: list[str] = Field(default_factory=list)
 
 
 class TopicBatch(BaseModel):
-    topics: list[Topic] = Field(default_factory=list)
+    topics: list[TopicCandidate] = Field(default_factory=list)
 
 
-def column_letter(index: int) -> str:
-    result = ""
-    while index:
-        index, remainder = divmod(index - 1, 26)
-        result = chr(65 + remainder) + result
-    return result
+def log(message: str) -> None:
+    print(message, flush=True)
 
 
-def connect_sheet() -> tuple[gspread.Worksheet, list[str]]:
-    gc = gspread.service_account_from_dict(json.loads(GOOGLE_CREDENTIALS))
-    ws = gc.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
-    headers = ws.row_values(1)
-    if not headers:
-        headers = REQUIRED_HEADERS.copy()
-    for header in REQUIRED_HEADERS:
-        if header not in headers:
-            headers.append(header)
-    ws.update(values=[headers], range_name=f"A1:{column_letter(len(headers))}1")
-    return ws, headers
+def normalize_slug(value: str) -> str:
+    value = value.strip().lower()
+    value = re.sub(r"[^a-z0-9]+", "-", value)
+    return value.strip("-")[:100]
 
 
-def validate_scientific_name(name: str) -> tuple[bool, str, str]:
+def gbif_validate(name: str) -> tuple[bool, str, str]:
     try:
-        response = session.get(
+        response = requests.get(
             "https://api.gbif.org/v1/species/match",
-            params={"name": name, "verbose": "true"},
-            timeout=30,
+            params={"name": name},
+            timeout=REQUEST_TIMEOUT,
         )
-        response.raise_for_status()
-        data = response.json()
-        confidence = int(data.get("confidence", 0))
-        match_type = data.get("matchType", "NONE")
-        canonical = data.get("canonicalName") or data.get("scientificName") or name
-        classification = " > ".join(
-            str(data.get(rank, ""))
-            for rank in ["kingdom", "phylum", "class", "order", "family", "genus"]
-            if data.get(rank)
+        if not response.ok:
+            return False, name, ""
+        data: dict[str, Any] = response.json()
+        if data.get("matchType") == "NONE" or not (data.get("usageKey") or data.get("speciesKey")):
+            return False, name, ""
+        confidence = int(data.get("confidence") or 0)
+        rank = str(data.get("rank") or "").upper()
+        if confidence < 80 or rank not in {"SPECIES", "SUBSPECIES"}:
+            return False, name, ""
+        accepted = str(data.get("scientificName") or name).strip()
+        lineage = " > ".join(
+            str(data.get(key) or "").strip()
+            for key in ("kingdom", "phylum", "class", "order", "family")
+            if str(data.get(key) or "").strip()
         )
-        return confidence >= 80 and match_type != "NONE", canonical, classification
+        return True, accepted, lineage
     except Exception:
         return False, name, ""
 
 
-def structured_topics(prompt: str) -> TopicBatch:
-    try:
-        interaction = client.interactions.create(
-            model=TOPIC_MODEL,
-            input=prompt,
-            tools=[{"type": "google_search"}],
-            response_format={
-                "type": "text",
-                "mime_type": "application/json",
-                "schema": TopicBatch.model_json_schema(),
-            },
-        )
-        return TopicBatch.model_validate_json(interaction.output_text)
-    except Exception as error:
-        print(f"⚠️ Interactions API 재시도: {error}")
-        response = client.models.generate_content(
-            model=TOPIC_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                tools=[types.Tool(google_search=types.GoogleSearch())],
-                response_mime_type="application/json",
-                response_schema=TopicBatch,
-            ),
-        )
-        return TopicBatch.model_validate_json(response.text)
+def generate_candidates(existing_species: set[str], existing_slugs: set[str], count: int) -> list[TopicCandidate]:
+    existing_preview = ", ".join(sorted(existing_species)[-250:]) or "없음"
+    prompt = f"""
+You are the editorial topic planner for TaxonGuru, a Korean-English popular-science biology site.
+Generate {max(count * 2, 16)} candidate topics. Return TopicBatch JSON only.
+
+Already used scientific names — never repeat them:
+{existing_preview}
+
+Rules:
+- Use a real species-level binomial scientific name, not 'spp.', a fictional taxon, or a broad genus.
+- Pick subjects with enough reliable institutional or scholarly sources for a 4-source article.
+- Category must be exactly one of: {CATEGORY_VALUES}
+- display_title: attractive Korean title with the English common name in parentheses where useful.
+- story_angle: one concrete reader question or scientific mystery, not generic hype.
+- taxonomy: concise lineage such as Animalia > Chordata > Mammalia.
+- slug: lowercase English, unique, 3-8 words, no year.
+- tags: 6-10 useful Korean and English tags.
+- Avoid clickbait words such as shocking, unbelievable, 대박, 충격, 소름.
+- Balance the four categories.
+"""
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=TopicBatch,
+            max_output_tokens=8192,
+            temperature=0.65,
+        ),
+    )
+    parsed = getattr(response, "parsed", None)
+    batch = parsed if isinstance(parsed, TopicBatch) else TopicBatch.model_validate(parsed or json.loads(response.text))
+
+    result: list[TopicCandidate] = []
+    for candidate in batch.topics:
+        raw_name = " ".join(candidate.scientific_name.split())
+        if raw_name.lower() in {name.lower() for name in existing_species}:
+            continue
+        valid, accepted, lineage = gbif_validate(raw_name)
+        if not valid:
+            continue
+        slug = normalize_slug(candidate.slug)
+        if not slug or slug in existing_slugs:
+            continue
+        if candidate.category not in CATEGORY_VALUES:
+            continue
+        candidate.scientific_name = accepted
+        candidate.taxonomy = candidate.taxonomy.strip() or lineage
+        candidate.slug = slug
+        candidate.tags = [str(tag).strip() for tag in candidate.tags if str(tag).strip()][:10]
+        result.append(candidate)
+        existing_species.add(accepted)
+        existing_slugs.add(slug)
+        if len(result) >= count:
+            break
+    return result
 
 
 def main() -> int:
-    ws, headers = connect_sheet()
-    rows = ws.get_all_values()[1:]
-    sci_idx = headers.index("학명")
-    slug_idx = headers.index("슬러그")
-    existing_names = {row[sci_idx].strip().casefold() for row in rows if len(row) > sci_idx and row[sci_idx].strip()}
-    existing_slugs = {row[slug_idx].strip().casefold() for row in rows if len(row) > slug_idx and row[slug_idx].strip()}
+    log("=" * 64)
+    log(f"TaxonGuru 주제 자동 보충 · 목표 {TOPIC_COUNT}건")
+    log("=" * 64)
 
-    prompt = f"""
-당신은 자연과학 전문 매체의 편집 기획자다. TaxonGuru가 깊이 있게 조사할 새 주제 {TOPIC_COUNT + 4}개를 제안하라.
-Google Search를 사용해 실제로 존재하는 생물과 현재 통용되는 학명을 확인하라.
+    creds = json.loads(GOOGLE_CREDENTIALS)
+    gc = gspread.service_account_from_dict(creds)
+    worksheet = gc.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
+    records = worksheet.get_all_values()
+    if not records:
+        raise RuntimeError("taxonguru 시트에 헤더가 없습니다.")
 
-이미 다룬 학명
-{json.dumps(sorted(existing_names), ensure_ascii=False)}
+    headers = records[0]
+    required = ["상태", "학명(Scientific Name)", "국문/영문명", "분류 트리", "카테고리", "스토리 앵글", "슬러그 (Slug)", "태그 (Tags)"]
+    if len(headers) < 8:
+        raise RuntimeError("taxonguru 시트의 기본 A:H 열이 부족합니다.")
 
-기획 원칙
-1. '조회수 폭발', '대박', '충격' 같은 클릭베이트를 쓰지 않는다.
-2. 각 주제는 단순 생물 소개가 아니라 검증 가능한 하나의 질문을 가진다.
-3. 서로 다른 형식을 섞는다: 오해 검증, 유사종 비교, 적응 원리, 분류 논쟁, 크기 비교, 보전 현황.
-4. 제목은 한국어 중심이며 괄호에 영어 일반명을 짧게 넣을 수 있다.
-5. 스토리앵글 대신 research_question에 출처로 검증할 수 있는 구체적인 질문을 적는다.
-6. 태그는 한국어와 영어를 합쳐 4~6개로 제한한다.
-7. 슬러그는 소문자 영문과 하이픈만 사용한다.
-8. 기존 학명과 중복하지 않는다.
-"""
-    batch = structured_topics(prompt)
+    existing_species = {
+        str(row[1]).strip()
+        for row in records[1:]
+        if len(row) > 1 and str(row[1]).strip()
+    }
+    existing_slugs = {
+        normalize_slug(str(row[6]))
+        for row in records[1:]
+        if len(row) > 6 and str(row[6]).strip()
+    }
 
-    rows_to_append: list[list[str]] = []
-    for topic in batch.topics:
-        valid, canonical, gbif_taxonomy = validate_scientific_name(topic.scientific_name)
-        if not valid:
-            print(f"건너뜀(GBIF 검증 실패): {topic.scientific_name}")
-            continue
-        if canonical.casefold() in existing_names or topic.slug.casefold() in existing_slugs:
-            continue
-
-        values = {
-            "상태": "대기",
-            "학명": canonical,
-            "국문/영문명": topic.title_ko,
-            "분류 트리": gbif_taxonomy or topic.taxonomy_hint,
-            "카테고리": topic.category,
-            "스토리앵글": topic.research_question,
-            "슬러그": topic.slug,
-            "태그": ", ".join(topic.tags[:6]),
-            "언어": "ko",
-        }
-        row = [""] * len(headers)
-        for key, value in values.items():
-            row[headers.index(key)] = value
-        rows_to_append.append(row)
-        existing_names.add(canonical.casefold())
-        existing_slugs.add(topic.slug.casefold())
-        if len(rows_to_append) >= TOPIC_COUNT:
+    collected: list[TopicCandidate] = []
+    for attempt in range(1, 4):
+        needed = TOPIC_COUNT - len(collected)
+        if needed <= 0:
             break
+        log(f"🔎 후보 생성·GBIF 검증 {attempt}/3 · 남은 목표 {needed}건")
+        try:
+            batch = generate_candidates(existing_species, existing_slugs, needed)
+            collected.extend(batch)
+        except Exception as exc:
+            log(f"⚠️ 주제 생성 재시도: {' '.join(str(exc).split())[:500]}")
+        time.sleep(attempt)
 
-    if rows_to_append:
-        ws.append_rows(rows_to_append, value_input_option="RAW")
-    print(f"✅ 검증된 신규 주제 {len(rows_to_append)}건을 추가했습니다.")
+    if not collected:
+        raise RuntimeError("검증된 신규 주제를 만들지 못했습니다.")
+
+    rows = []
+    for topic in collected[:TOPIC_COUNT]:
+        rows.append(
+            [
+                "대기",
+                topic.scientific_name,
+                topic.display_title.strip(),
+                topic.taxonomy.strip(),
+                topic.category,
+                topic.story_angle.strip(),
+                topic.slug,
+                ", ".join(topic.tags),
+            ]
+        )
+    worksheet.append_rows(rows, value_input_option="USER_ENTERED")
+    log(f"✅ 검증된 신규 주제 {len(rows)}건을 대기 상태로 추가했습니다.")
     return 0
 
 

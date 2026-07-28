@@ -19,6 +19,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 import bleach
 import gspread
 import requests
+import urllib3.util.connection as urllib3_connection
 from google import genai
 from google.genai import types
 from openai import OpenAI
@@ -67,6 +68,9 @@ AUTO_SCHEDULE = os.getenv("AUTO_SCHEDULE", "true").lower() == "true"
 DRAFT_ON_REVIEW_FAILURE = os.getenv("DRAFT_ON_REVIEW_FAILURE", "true").lower() == "true"
 DRAFT_STATUS = os.getenv("WP_DRAFT_STATUS", "draft")
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "45"))
+FORCE_IPV4 = os.getenv("FORCE_IPV4", "true").lower() == "true"
+if FORCE_IPV4:
+    urllib3_connection.HAS_IPV6 = False
 MAX_STRUCTURED_ATTEMPTS = max(1, int(os.getenv("MAX_STRUCTURED_ATTEMPTS", "3")))
 MAX_TEXT_ATTEMPTS = max(1, int(os.getenv("MAX_TEXT_ATTEMPTS", "3")))
 MAX_REWRITE_ROUNDS = max(0, int(os.getenv("MAX_REWRITE_ROUNDS", "2")))
