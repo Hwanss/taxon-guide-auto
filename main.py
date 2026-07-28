@@ -828,8 +828,85 @@ def sync_scheduled_posts(
 # -----------------------------------------------------------------------------
 # Grounded research
 # -----------------------------------------------------------------------------
+def _obj_value(obj: Any, key: str, default: Any = None) -> Any:
+    """Read a value from either a dict or an SDK/Pydantic object."""
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def classify_source_type(url: str, publisher: str = "", title: str = "") -> str:
+    """Classify a source conservatively from its domain and metadata."""
+    host = (urlsplit(url).hostname or "").casefold()
+    publisher_key = publisher.casefold()
+    title_key = title.casefold()
+
+    if host.endswith(".gov") or ".gov." in host:
+        return "government"
+    if host.endswith(".edu") or ".edu." in host or any(
+        token in host for token in ["si.edu", "nhm.ac.uk", "amnh.org", "museum", "university"]
+    ):
+        return "museum_or_university"
+    if any(
+        token in host
+        for token in [
+            "gbif.org",
+            "marinespecies.org",
+            "ncbi.nlm.nih.gov",
+            "iucnredlist.org",
+            "itis.gov",
+            "catalogueoflife.org",
+        ]
+    ):
+        return "scientific_database"
+    if host == "doi.org" or "journal" in host or "springer" in host or "wiley" in host or "sciencedirect" in host:
+        return "peer_reviewed_paper"
+    if any(token in publisher_key for token in ["university", "museum", "institute", "academy"]):
+        return "museum_or_university"
+    if any(token in title_key for token in ["journal", "proceedings", "research", "revision"]):
+        return "peer_reviewed_paper"
+    if "wikipedia.org" in host:
+        return "reputable_secondary"
+    return "other"
+
+
+def merge_research_sources(*groups: list[ResearchSource], limit: int = 14) -> list[ResearchSource]:
+    merged: list[ResearchSource] = []
+    seen: set[str] = set()
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    for group in groups:
+        for source in group:
+            normalized = normalize_url(source.url)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            source.url = normalized
+            source.title = strip_html(source.title).strip() or normalized
+            source.publisher = strip_html(source.publisher).strip() or (urlsplit(normalized).hostname or "")
+            source.accessed_date = source.accessed_date or today
+            if source.source_type == "other":
+                source.source_type = classify_source_type(normalized, source.publisher, source.title)  # type: ignore[assignment]
+            merged.append(source)
+            if len(merged) >= limit:
+                return merged
+    return merged
+
+
 def fetch_seed_context(scientific_name: str) -> dict[str, Any]:
-    seed: dict[str, Any] = {"gbif": {}, "wikipedia": {}, "crossref": []}
+    """Collect deterministic taxonomy and bibliography seeds before asking Gemini.
+
+    These APIs are not used blindly as article facts. They create a stable source
+    catalogue so a temporary grounding-format issue cannot turn a well-known
+    species into a false '0 sources' result.
+    """
+    seed: dict[str, Any] = {
+        "gbif": {},
+        "wikipedia": {},
+        "crossref": [],
+        "worms": {},
+        "ncbi_taxonomy": {},
+    }
 
     # GBIF taxonomy match
     try:
@@ -843,7 +920,7 @@ def fetch_seed_context(scientific_name: str) -> dict[str, Any]:
     except requests.RequestException as exc:
         log(f"  ⚠️ GBIF 조회 실패: {exc}")
 
-    # Wikipedia summary is a seed, never the sole authority.
+    # Wikipedia summary is a discovery seed, never the sole authority.
     try:
         title = quote(scientific_name.replace(" ", "_"), safe="")
         response = session.get(
@@ -860,13 +937,14 @@ def fetch_seed_context(scientific_name: str) -> dict[str, Any]:
     except requests.RequestException as exc:
         log(f"  ⚠️ Wikipedia 요약 조회 실패: {exc}")
 
-    # Crossref scholarly works
+    # Crossref scholarly works. We retain metadata, then let the research model
+    # decide which papers actually support a claim.
     try:
         response = session.get(
             "https://api.crossref.org/works",
             params={
                 "query.bibliographic": f'"{scientific_name}"',
-                "rows": 5,
+                "rows": 8,
                 "mailto": CONTACT_EMAIL,
             },
             timeout=REQUEST_TIMEOUT,
@@ -882,20 +960,223 @@ def fetch_seed_context(scientific_name: str) -> dict[str, Any]:
                         "url": f"https://doi.org/{doi}" if doi else work.get("URL", ""),
                         "publisher": work.get("publisher", ""),
                         "type": work.get("type", ""),
+                        "score": work.get("score", 0),
                     }
                 )
     except requests.RequestException as exc:
         log(f"  ⚠️ Crossref 조회 실패: {exc}")
 
+    # WoRMS is especially useful for marine taxa such as Scotoplanes.
+    try:
+        encoded_name = quote(scientific_name, safe="")
+        response = session.get(
+            f"https://www.marinespecies.org/rest/AphiaRecordsByName/{encoded_name}",
+            params={"like": "false", "marine_only": "false"},
+            timeout=REQUEST_TIMEOUT,
+        )
+        if response.ok:
+            records = response.json() or []
+            exact = next(
+                (
+                    record
+                    for record in records
+                    if str(record.get("scientificname", "")).casefold() == scientific_name.casefold()
+                ),
+                records[0] if records else {},
+            )
+            seed["worms"] = exact
+    except requests.RequestException as exc:
+        log(f"  ⚠️ WoRMS 조회 실패: {exc}")
+
+    # NCBI Taxonomy gives another independent taxonomic identifier when present.
+    try:
+        response = session.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+            params={
+                "db": "taxonomy",
+                "term": f'"{scientific_name}"[Scientific Name]',
+                "retmode": "json",
+            },
+            timeout=REQUEST_TIMEOUT,
+        )
+        if response.ok:
+            id_list = response.json().get("esearchresult", {}).get("idlist", [])
+            if id_list:
+                seed["ncbi_taxonomy"] = {"tax_id": str(id_list[0])}
+    except requests.RequestException as exc:
+        log(f"  ⚠️ NCBI Taxonomy 조회 실패: {exc}")
+
     return seed
+
+
+def build_seed_sources(seed_context: dict[str, Any], scientific_name: str) -> list[ResearchSource]:
+    today = datetime.now().strftime("%Y-%m-%d")
+    sources: list[ResearchSource] = []
+
+    gbif = seed_context.get("gbif") or {}
+    gbif_key = gbif.get("usageKey") or gbif.get("speciesKey") or gbif.get("key")
+    if gbif_key:
+        canonical_name = gbif.get("canonicalName") or gbif.get("scientificName") or scientific_name
+        sources.append(
+            ResearchSource(
+                title=f"GBIF species record: {canonical_name}",
+                url=f"https://www.gbif.org/species/{gbif_key}",
+                publisher="Global Biodiversity Information Facility (GBIF)",
+                source_type="scientific_database",
+                accessed_date=today,
+            )
+        )
+
+    wikipedia = seed_context.get("wikipedia") or {}
+    if normalize_url(str(wikipedia.get("page", ""))):
+        sources.append(
+            ResearchSource(
+                title=str(wikipedia.get("title") or scientific_name),
+                url=str(wikipedia.get("page", "")),
+                publisher="Wikipedia",
+                source_type="reputable_secondary",
+                accessed_date=today,
+            )
+        )
+
+    worms = seed_context.get("worms") or {}
+    aphia_id = worms.get("AphiaID")
+    if aphia_id:
+        sources.append(
+            ResearchSource(
+                title=f"WoRMS taxon details: {worms.get('scientificname') or scientific_name}",
+                url=f"https://www.marinespecies.org/aphia.php?p=taxdetails&id={aphia_id}",
+                publisher="World Register of Marine Species (WoRMS)",
+                source_type="scientific_database",
+                accessed_date=today,
+            )
+        )
+
+    ncbi = seed_context.get("ncbi_taxonomy") or {}
+    tax_id = str(ncbi.get("tax_id", "")).strip()
+    if tax_id:
+        sources.append(
+            ResearchSource(
+                title=f"NCBI Taxonomy: {scientific_name}",
+                url=f"https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id={tax_id}",
+                publisher="National Center for Biotechnology Information",
+                source_type="scientific_database",
+                accessed_date=today,
+            )
+        )
+
+    for work in seed_context.get("crossref") or []:
+        url = normalize_url(str(work.get("url", "")))
+        title = strip_html(str(work.get("title", ""))).strip()
+        if not url or not title:
+            continue
+        sources.append(
+            ResearchSource(
+                title=title,
+                url=url,
+                publisher=str(work.get("publisher", "")),
+                source_type="peer_reviewed_paper",
+                accessed_date=today,
+            )
+        )
+
+    return merge_research_sources(sources, limit=10)
+
+
+def extract_interaction_citations(interaction: Any) -> list[ResearchSource]:
+    """Extract Google Search URL citations from Interactions API annotations."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    extracted: list[ResearchSource] = []
+
+    for step in _obj_value(interaction, "steps", []) or []:
+        if _obj_value(step, "type", "") != "model_output":
+            continue
+        for block in _obj_value(step, "content", []) or []:
+            for annotation in _obj_value(block, "annotations", []) or []:
+                if _obj_value(annotation, "type", "") != "url_citation":
+                    continue
+                url = normalize_url(str(_obj_value(annotation, "url", "")))
+                if not url:
+                    continue
+                title = str(_obj_value(annotation, "title", "")).strip() or url
+                host = urlsplit(url).hostname or ""
+                extracted.append(
+                    ResearchSource(
+                        title=title,
+                        url=url,
+                        publisher=host,
+                        source_type=classify_source_type(url, host, title),  # type: ignore[arg-type]
+                        accessed_date=today,
+                    )
+                )
+    return merge_research_sources(extracted, limit=12)
+
+
+def run_grounded_research_search(
+    item: SheetItem,
+    seed_context: dict[str, Any],
+) -> tuple[str, list[ResearchSource]]:
+    """Run a citation-producing web research pass before JSON extraction."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    prompt = f"""
+Research the organism below for a bilingual popular-science article. Use Google Search,
+prefer primary or institutional sources, and write a compact evidence memo. Every major
+claim must be grounded in the search results. Do not invent URLs or references.
+
+Subject
+- Scientific name: {item.scientific_name}
+- Existing taxonomy note: {item.taxonomy}
+- Editorial angle: {item.story_angle}
+- Research date: {today}
+
+Deterministic API seeds
+{json.dumps(seed_context, ensure_ascii=False, indent=2)[:22000]}
+
+Cover accepted name and taxonomy, distribution and habitat, morphology, locomotion,
+feeding and ecological role, reproduction if documented, conservation status if assessed,
+common misconceptions, and any disputed or uncertain claims. Clearly say when evidence is limited.
+"""
+    interaction = gemini_client.interactions.create(
+        model=RESEARCH_MODEL,
+        input=prompt,
+        tools=[{"type": "google_search"}],
+    )
+    memo = str(_obj_value(interaction, "output_text", "") or "").strip()
+    citations = extract_interaction_citations(interaction)
+    return memo, citations
 
 
 def research_subject(item: SheetItem) -> ResearchPackage:
     seed_context = fetch_seed_context(item.scientific_name)
+    seed_sources = build_seed_sources(seed_context, item.scientific_name)
+
+    search_memo = ""
+    search_sources: list[ResearchSource] = []
+    try:
+        search_memo, search_sources = run_grounded_research_search(item, seed_context)
+    except Exception as exc:
+        # The deterministic seeds still allow the job to continue when Google Search
+        # has a temporary outage or changes its annotation format.
+        log(f"  ⚠️ Google Search 연구 패스 실패, API 시드로 계속합니다: {exc}")
+
+    source_catalog = merge_research_sources(search_sources, seed_sources, limit=12)
+    log(
+        f"  🔎 출처 후보: Google Search {len(search_sources)}개 + "
+        f"기관/API {len(seed_sources)}개 → 중복 제거 {len(source_catalog)}개"
+    )
+
+    if not source_catalog:
+        return ResearchPackage(accepted_scientific_name=item.scientific_name)
+
+    source_catalog_json = json.dumps(
+        [source.model_dump() for source in source_catalog],
+        ensure_ascii=False,
+        indent=2,
+    )
     today = datetime.now().strftime("%Y-%m-%d")
     prompt = f"""
-당신은 자연과학 편집부의 리서처다. 아래 생물을 Google Search와 제공된 데이터로 조사하고,
-검증 가능한 사실만 구조화해서 반환하라.
+당신은 자연과학 편집부의 팩트체커다. 아래 연구 메모와 고정된 출처 목록만 사용해
+ResearchPackage JSON을 작성하라. 검색하거나 새로운 URL을 만들지 마라.
 
 연구 대상
 - 학명: {item.scientific_name}
@@ -904,35 +1185,54 @@ def research_subject(item: SheetItem) -> ResearchPackage:
 - 글의 질문/관점: {item.story_angle}
 - 조사일: {today}
 
-기초 API 데이터
-{json.dumps(seed_context, ensure_ascii=False, indent=2)[:24000]}
+Google Search 기반 연구 메모
+{search_memo[:30000]}
 
-엄격한 기준
-1. 학명, 분류, 분포, 보전상태, 형태·생태 수치는 서로 다른 신뢰 자료로 교차 확인한다.
-2. 정부기관, 대학·박물관, 과학 데이터베이스, 원 논문을 우선한다.
-3. Wikipedia는 탐색용 보조자료일 뿐 핵심 사실의 유일한 근거로 사용하지 않는다.
-4. 논쟁적 주장과 확정 사실을 분리하고, 자료가 충돌하면 양쪽 근거와 결론을 적는다.
-5. 검색결과 요약문이나 AI 문장을 출처로 만들지 말고, 직접 열 수 있는 원문 URL을 기록한다.
-6. sources에는 중복 없는 직접 URL을 5~10개 넣고, 본문 사실은 source_numbers로 연결한다.
-7. 확인되지 않은 수치, 과장, 의인화, 자극적 표현은 넣지 않는다.
-8. 실제 자격을 확인할 수 없으므로 '수석 고생물학자', '전문가' 등의 가상 직함을 만들지 않는다.
+기초 API 데이터
+{json.dumps(seed_context, ensure_ascii=False, indent=2)[:22000]}
+
+사용 가능한 출처 목록 — 번호는 배열 순서대로 1부터 시작한다
+{source_catalog_json}
+
+엄격한 작성 기준
+1. accepted_scientific_name, common_name_ko, common_name_en, taxonomy, overview,
+   distribution_and_habitat, conservation_status를 가능한 범위에서 채운다.
+2. verified_facts는 최소 6건을 목표로 하되, 자료가 실제로 확인되는 내용만 쓴다.
+3. 모든 verified_facts, common_misconceptions, disputed_or_uncertain 항목에는
+   위 출처 목록의 번호를 source_numbers로 넣는다.
+4. 전체 결과에서 서로 다른 출처 번호를 최소 4개 사용한다. 한 주장에는 가능하면
+   독립적인 출처 2개를 연결한다.
+5. 논쟁적 주장과 확정 사실을 분리하고, 자료가 충돌하면 양쪽 근거와 결론을 적는다.
+6. Wikipedia는 보조자료일 뿐 핵심 사실의 유일한 근거로 사용하지 않는다.
+7. 확인되지 않은 수치·과장·의인화·가상의 직함을 넣지 않는다.
+8. sources 필드는 비워도 된다. 프로그램이 위 고정 출처 목록을 다시 삽입한다.
+9. 출처 목록으로 확인할 수 없는 내용은 limitations에 기록하고 사실처럼 쓰지 않는다.
 """
-    result = gemini_structured(
-        RESEARCH_MODEL,
-        prompt,
-        ResearchPackage,
-        tools_list=["google_search", "url_context"],
-    )
+
+    result = gemini_structured(RESEARCH_MODEL, prompt, ResearchPackage)
     assert isinstance(result, ResearchPackage)
+    # Never trust the model to reproduce URLs. Keep the deterministic and
+    # annotation-derived catalogue, while the model only selects source numbers.
+    result.sources = [source.model_copy(deep=True) for source in source_catalog]
     return normalize_research_package(result, item.scientific_name)
 
 
 def normalize_research_package(package: ResearchPackage, fallback_name: str) -> ResearchPackage:
+    # Keep only sources actually cited by a fact, misconception, or disputed claim.
+    # This prevents unrelated Crossref search hits from inflating the quality gate.
+    cited_numbers: set[int] = set()
+    for fact in package.verified_facts + package.common_misconceptions:
+        cited_numbers.update(number for number in fact.source_numbers if number > 0)
+    for disputed in package.disputed_or_uncertain:
+        cited_numbers.update(number for number in disputed.source_numbers if number > 0)
+
     old_to_new: dict[int, int] = {}
     seen: set[str] = set()
     clean_sources: list[ResearchSource] = []
 
     for old_index, source in enumerate(package.sources, start=1):
+        if cited_numbers and old_index not in cited_numbers:
+            continue
         normalized = normalize_url(source.url)
         if not normalized or normalized in seen:
             continue
