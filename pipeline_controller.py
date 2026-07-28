@@ -15,11 +15,17 @@ import requests
 import urllib3.util.connection as urllib3_connection
 
 # =============================================================================
-# TaxonGuru Master Controller
-# 1) Google Sheets 상태가 정확히 '완료'인 기존 글만 최근순으로 정리
-# 2) '한영예약완료' 및 다른 상태는 기존 정리 단계에서 건드리지 않음
-# 3) '완료'가 0건이 되면 신규 한·영 작성 단계로 자동 전환
-# 4) 대기 주제가 기준보다 적어지면 주제 목록을 자동 보충
+# TaxonGuru Master Controller v4
+#
+# Priority
+# 1) Sync already scheduled posts.
+# 2) Automatically migrate old '기존비공개완료' rows into the rewrite queue.
+# 3) Rewrite one queued legacy post and reserve it in the next free KO/EN slots.
+# 4) Audit recent rows whose status is exactly '완료'. A/B/C/D decisions never
+#    permanently delete content; unsafe posts are drafts and are queued for rewrite.
+# 5) Wait until legacy rewrite reservations have actually published.
+# 6) Repair incomplete English versions.
+# 7) Only then create a new waiting topic; refill topics when the queue is low.
 # =============================================================================
 
 WP_SITE_URL = os.getenv("WP_SITE_URL", "https://taxonguru.com").rstrip("/")
@@ -32,7 +38,7 @@ CONTROL_SHEET_NAME = os.getenv("CONTROL_SHEET_NAME", "파이프라인상태")
 TIMEZONE_NAME = os.getenv("SCHEDULE_TIMEZONE", "Asia/Seoul")
 
 LEGACY_TARGET_STATUS = os.getenv("LEGACY_TARGET_STATUS", "완료").strip()
-LEGACY_BATCH_SIZE = max(1, min(10, int(os.getenv("LEGACY_BATCH_SIZE", "2"))))
+LEGACY_BATCH_SIZE = max(1, min(10, int(os.getenv("LEGACY_BATCH_SIZE", "1"))))
 TOPIC_REFILL_THRESHOLD = max(0, int(os.getenv("TOPIC_REFILL_THRESHOLD", "10")))
 TOPIC_REFILL_COUNT = max(1, min(30, int(os.getenv("TOPIC_REFILL_COUNT", "12"))))
 NEW_WINDOW_START_HOUR = int(os.getenv("NEW_WINDOW_START_HOUR", "2"))
@@ -48,11 +54,16 @@ if FORCE_IPV4:
     urllib3_connection.HAS_IPV6 = False
 
 KST = ZoneInfo(TIMEZONE_NAME)
-REPAIR_STATUSES = {
+LEGACY_REWRITE_STATES = {"기존재작성대기", "기존재작성재시도"}
+LEGACY_SCHEDULED_STATES = {
+    "기존한영재예약완료",
+    "기존재예약완료",
+    "기존한국어재예약/영문검수필요",
+    "기존한국어공개/영문재예약",
+}
+ENGLISH_REPAIR_STATES = {
     "한국어예약/영문검수필요",
     "한국어완료/영문검수필요",
-    "검수필요",
-    "재작성",
 }
 
 
@@ -64,6 +75,23 @@ def normalize_header(value: str) -> str:
     return "".join(str(value or "").split()).lower()
 
 
+def find_header(headers: list[str], aliases: list[str]) -> int | None:
+    normalized = [normalize_header(h) for h in headers]
+    for alias in aliases:
+        key = normalize_header(alias)
+        if key in normalized:
+            return normalized.index(key)
+    return None
+
+
+def safe_int(value: Any) -> int | None:
+    try:
+        number = int(str(value).strip())
+        return number if number > 0 else None
+    except Exception:
+        return None
+
+
 def connect_book() -> tuple[gspread.Spreadsheet, gspread.Worksheet, gspread.Worksheet]:
     creds = json.loads(GOOGLE_CREDENTIALS)
     gc = gspread.service_account_from_dict(creds)
@@ -72,33 +100,74 @@ def connect_book() -> tuple[gspread.Spreadsheet, gspread.Worksheet, gspread.Work
     try:
         control_ws = book.worksheet(CONTROL_SHEET_NAME)
     except gspread.WorksheetNotFound:
-        control_ws = book.add_worksheet(title=CONTROL_SHEET_NAME, rows=30, cols=2)
+        control_ws = book.add_worksheet(title=CONTROL_SHEET_NAME, rows=40, cols=2)
     return book, topic_ws, control_ws
 
 
-def read_status_counts(topic_ws: gspread.Worksheet) -> tuple[Counter[str], list[str]]:
+def read_sheet(topic_ws: gspread.Worksheet) -> tuple[list[str], list[list[str]], Counter[str]]:
     values = topic_ws.get_all_values()
     if not values:
-        return Counter(), []
+        return [], [], Counter()
     headers = values[0]
-    normalized = [normalize_header(h) for h in headers]
-    try:
-        status_index = normalized.index(normalize_header("상태"))
-    except ValueError as exc:
-        raise RuntimeError("taxonguru 시트 1행에서 '상태' 헤더를 찾지 못했습니다.") from exc
+    status_index = find_header(headers, ["상태", "진행상태"])
+    if status_index is None:
+        raise RuntimeError("taxonguru 시트 1행에서 '상태' 헤더를 찾지 못했습니다.")
     statuses: list[str] = []
     for row in values[1:]:
-        value = str(row[status_index]).strip() if status_index < len(row) else ""
-        if value:
-            statuses.append(value)
-    return Counter(statuses), headers
+        status = row[status_index].strip() if status_index < len(row) else ""
+        if status:
+            statuses.append(status)
+    return headers, values[1:], Counter(statuses)
+
+
+def batch_update_statuses(
+    topic_ws: gspread.Worksheet,
+    headers: list[str],
+    rows: list[list[str]],
+) -> int:
+    """Migrate old terminal private rows without requiring user edits.
+
+    A row is requeued only when it has a scientific name and an existing Korean
+    post ID. Otherwise it remains safely hidden as '기존비공개보류'.
+    """
+    status_idx = find_header(headers, ["상태"])
+    sci_idx = find_header(headers, ["학명", "학명(Scientific Name)", "학명 (Scientific Name)"])
+    post_idx = find_header(headers, ["WP_POST_ID", "WP POST ID"])
+    note_idx = find_header(headers, ["정리메모", "정리 메모"])
+    error_idx = find_header(headers, ["오류", "에러"])
+    if status_idx is None:
+        return 0
+
+    cells: list[gspread.Cell] = []
+    migrated = 0
+    for row_number, row in enumerate(rows, start=2):
+        status = row[status_idx].strip() if status_idx < len(row) else ""
+        if status != "기존비공개완료":
+            continue
+        scientific_name = row[sci_idx].strip() if sci_idx is not None and sci_idx < len(row) else ""
+        post_id = safe_int(row[post_idx]) if post_idx is not None and post_idx < len(row) else None
+        next_status = "기존재작성대기" if scientific_name and post_id else "기존비공개보류"
+        cells.append(gspread.Cell(row_number, status_idx + 1, next_status))
+        if note_idx is not None:
+            cells.append(
+                gspread.Cell(
+                    row_number,
+                    note_idx + 1,
+                    "기존 비공개 글 자동 재작성 대기열 편입" if next_status == "기존재작성대기" else "자동 재작성에 필요한 학명 또는 게시물 ID 없음",
+                )
+            )
+        if error_idx is not None and next_status == "기존재작성대기":
+            cells.append(gspread.Cell(row_number, error_idx + 1, ""))
+        migrated += 1
+    if cells:
+        topic_ws.update_cells(cells, value_input_option="USER_ENTERED")
+    return migrated
 
 
 def update_control(control_ws: gspread.Worksheet, **data: Any) -> None:
     now = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S %Z")
     rows = [["항목", "값"], ["최근실행", now]]
-    for key, value in data.items():
-        rows.append([str(key), str(value)])
+    rows.extend([[str(key), str(value)] for key, value in data.items()])
     control_ws.clear()
     control_ws.update("A1", rows, value_input_option="USER_ENTERED")
 
@@ -113,7 +182,7 @@ def preflight_wordpress() -> tuple[bool, str]:
                 params={"per_page": 1, "context": "edit", "_fields": "id,status,modified"},
                 auth=(WP_USER, WP_APP_PASSWORD),
                 timeout=REQUEST_TIMEOUT,
-                headers={"User-Agent": "TaxonGuruMasterController/2.0"},
+                headers={"User-Agent": "TaxonGuruMasterController/4.0"},
             )
             if response.status_code == 200:
                 return True, "WordPress REST 연결 정상"
@@ -143,57 +212,128 @@ def new_publish_window_open() -> bool:
     return NEW_WINDOW_START_HOUR <= hour < NEW_WINDOW_END_HOUR
 
 
+def count_any(counts: Counter[str], states: set[str]) -> int:
+    return sum(counts.get(state, 0) for state in states)
+
+
 def summary_values(counts: Counter[str]) -> dict[str, Any]:
     return {
         "기존완료잔여": counts.get(LEGACY_TARGET_STATUS, 0),
+        "기존재작성대기": count_any(counts, LEGACY_REWRITE_STATES),
+        "기존재예약대기": count_any(counts, LEGACY_SCHEDULED_STATES),
+        "기존비공개보류": counts.get("기존비공개보류", 0),
         "한영예약완료보존": counts.get("한영예약완료", 0),
         "대기주제": counts.get("대기", 0),
-        "영문재검수등": sum(counts.get(status, 0) for status in REPAIR_STATUSES),
+        "영문재검수": count_any(counts, ENGLISH_REPAIR_STATES),
     }
 
 
-def main() -> int:
-    log("=" * 72)
-    log("TaxonGuru 마스터 자동 운영: 기존 완료 정리 → 신규 한·영 작성 → 주제 보충")
-    log(
-        f"기존대상='{LEGACY_TARGET_STATUS}' 정확히 일치 · 회당 {LEGACY_BATCH_SIZE}건 · "
-        f"대기 {TOPIC_REFILL_THRESHOLD}건 미만이면 {TOPIC_REFILL_COUNT}건 보충"
+def sync_reservations(topic_ws: gspread.Worksheet, control_ws: gspread.Worksheet) -> int:
+    code = run_script(
+        "WordPress 예약 상태 동기화",
+        "main.py",
+        {"PROCESS_MODE": "sync_only", "FORCE_IPV4": "true"},
     )
-    log("=" * 72)
+    if code != 0:
+        _, _, counts = read_sheet(topic_ws)
+        update_control(
+            control_ws,
+            단계="예약동기화오류",
+            결과=f"main.py 종료코드 {code}",
+            **summary_values(counts),
+            다음작업="다음 자동 실행에서 재시도",
+            오류="예약 상태 동기화 로그 확인",
+        )
+    return code
+
+
+def process_one_legacy_rewrite(topic_ws: gspread.Worksheet, control_ws: gspread.Worksheet) -> int:
+    _, _, before = read_sheet(topic_ws)
+    update_control(
+        control_ws,
+        단계="기존글자동재작성",
+        결과="비공개된 기존 글 1건을 한·영으로 재작성하고 다음 빈 순번에 예약합니다.",
+        **summary_values(before),
+        다음작업="main.py PROCESS_MODE=legacy_rewrite",
+        오류="",
+    )
+    code = run_script(
+        "기존 비공개 글 자동 재작성·재예약",
+        "main.py",
+        {
+            "PROCESS_MODE": "legacy_rewrite",
+            "FORCE_IPV4": "true",
+            "ENABLE_ENGLISH": "true",
+            "AUTO_SCHEDULE": "true",
+        },
+    )
+    _, _, after = read_sheet(topic_ws)
+    update_control(
+        control_ws,
+        단계="기존글자동재작성" if count_any(after, LEGACY_REWRITE_STATES) else "기존재작성대기열소진",
+        결과="정상 처리" if code == 0 else f"종료코드 {code}",
+        **summary_values(after),
+        다음작업="다음 자동 실행에서 계속" if count_any(after, LEGACY_REWRITE_STATES) else "기존 완료 글 감사 또는 예약 발행 대기",
+        오류="" if code == 0 else "main.py 로그 확인",
+    )
+    return code
+
+
+def main() -> int:
+    log("=" * 76)
+    log("TaxonGuru Master v4: 기존 감사 → 비공개 재작성 → 다음 빈 순번 예약 → 신규 자동운영")
+    log(
+        f"기존 감사 대상='{LEGACY_TARGET_STATUS}' 정확히 일치 · 감사 회당 {LEGACY_BATCH_SIZE}건 · "
+        f"재작성 최대 {os.getenv('MAX_LEGACY_REWRITE_ATTEMPTS', '3')}회"
+    )
+    log("=" * 76)
 
     _, topic_ws, control_ws = connect_book()
-    counts, _ = read_status_counts(topic_ws)
-    values = summary_values(counts)
+    headers, rows, counts = read_sheet(topic_ws)
+    migrated = batch_update_statuses(topic_ws, headers, rows)
+    if migrated:
+        log(f"🔁 기존비공개완료 {migrated}건을 자동 재작성대기/비공개보류로 전환했습니다.")
+        headers, rows, counts = read_sheet(topic_ws)
 
     wp_ok, wp_message = preflight_wordpress()
     if not wp_ok:
         update_control(
             control_ws,
             단계="연결대기",
-            결과="WordPress 연결 실패로 이번 실행을 보류했습니다. 다음 예약 실행에서 자동 재시도합니다.",
-            **values,
-            다음작업="자동 재시도",
+            결과="WordPress 연결 실패로 이번 실행을 보류했습니다.",
+            **summary_values(counts),
+            다음작업="다음 예약 실행에서 자동 재시도",
             오류=wp_message,
         )
         log(f"⚠️ {wp_message}")
         return 0
 
-    legacy_remaining = counts.get(LEGACY_TARGET_STATUS, 0)
+    # Always synchronize future→publish before deciding the next phase.
+    if sync_reservations(topic_ws, control_ws) != 0:
+        return 0
+    headers, rows, counts = read_sheet(topic_ws)
 
-    # ------------------------------------------------------------------
-    # Phase 1: exact status '완료' only. Other statuses are untouched.
-    # ------------------------------------------------------------------
+    if FORCE_PHASE == "status_only":
+        update_control(control_ws, 단계="상태확인", 결과="변경 없이 상태만 확인했습니다.", **summary_values(counts), 다음작업="자동 운영", 오류="")
+        return 0
+
+    # 1) Existing rewrite queue has absolute priority.
+    if FORCE_PHASE in {"auto", "cleanup"} and count_any(counts, LEGACY_REWRITE_STATES) > 0:
+        return process_one_legacy_rewrite(topic_ws, control_ws)
+
+    # 2) Audit recent exact-'완료' legacy posts. The audit queues B/C/D posts.
+    legacy_remaining = counts.get(LEGACY_TARGET_STATUS, 0)
     if FORCE_PHASE == "cleanup" or (FORCE_PHASE == "auto" and legacy_remaining > 0):
         update_control(
             control_ws,
-            단계="기존자료정리",
-            결과="기존 완료 글을 최근순으로 감사·수정 중",
-            **values,
-            다음작업=f"최근 글 {min(LEGACY_BATCH_SIZE, legacy_remaining)}건 처리",
+            단계="기존자료감사",
+            결과="최근 기존 글을 감사하고 유지 또는 자동 재작성 대기열로 분류합니다.",
+            **summary_values(counts),
+            다음작업=f"최근 {min(LEGACY_BATCH_SIZE, legacy_remaining)}건 감사",
             오류="",
         )
         code = run_script(
-            "기존 완료 게시물 감사·수정",
+            "기존 완료 게시물 감사·대기열 분류",
             "audit_existing_posts.py",
             {
                 "AUDIT_MODE": "rewrite_recent",
@@ -202,109 +342,95 @@ def main() -> int:
                 "AUTO_CLEANUP_MODE": "true",
                 "AUTO_FAIL_CLOSED_DRAFT": "true",
                 "AUTO_TRASH_GRADE_D": "false",
+                "QUEUE_GRADE_D_FOR_REWRITE": "true",
                 "INCLUDE_ALREADY_AUDITED": "true",
-                "AUDIT_CREATE_ENGLISH": "true",
+                "AUDIT_CREATE_ENGLISH": "false",
                 "AUDIT_DRAFT_GRADE_D": "true",
                 "AUDIT_INCLUDE_ENGLISH_POSTS": "false",
                 "FORCE_IPV4": "true",
             },
         )
-        counts_after, _ = read_status_counts(topic_ws)
-        after_values = summary_values(counts_after)
+        _, _, after = read_sheet(topic_ws)
+        if code == 0 and count_any(after, LEGACY_REWRITE_STATES) > 0:
+            # Complete one full audit→rewrite cycle in the same workflow run.
+            return process_one_legacy_rewrite(topic_ws, control_ws)
         update_control(
             control_ws,
-            단계="기존자료정리" if counts_after.get(LEGACY_TARGET_STATUS, 0) else "기존자료정리완료",
-            결과="정상 처리" if code == 0 else f"감사 스크립트 종료코드 {code}",
-            **after_values,
-            다음작업=(
-                "다음 예약 실행에서 기존 완료 글 계속 처리"
-                if counts_after.get(LEGACY_TARGET_STATUS, 0)
-                else "다음 오전 실행부터 신규 한·영 작성 시작"
-            ),
+            단계="기존자료감사" if after.get(LEGACY_TARGET_STATUS, 0) else "기존자료감사완료",
+            결과="정상 처리" if code == 0 else f"감사 종료코드 {code}",
+            **summary_values(after),
+            다음작업="다음 자동 실행에서 계속",
             오류="" if code == 0 else "audit_existing_posts.py 로그 확인",
         )
         return code
 
-    if FORCE_PHASE == "cleanup" and legacy_remaining == 0:
-        update_control(control_ws, 단계="기존자료정리완료", 결과="처리할 완료 상태가 없습니다.", **values, 다음작업="신규단계", 오류="")
+    if FORCE_PHASE == "cleanup":
+        update_control(control_ws, 단계="기존정리완료", 결과="감사·재작성 대기 대상이 없습니다.", **summary_values(counts), 다음작업="예약 발행 완료 대기 또는 신규 단계", 오류="")
         return 0
 
-    # ------------------------------------------------------------------
-    # Phase 2: one new/retry item per morning. Afternoon schedule only monitors.
-    # ------------------------------------------------------------------
-    if FORCE_PHASE == "status_only" or not new_publish_window_open():
+    # 3) Do not start new work until repaired legacy reservations are published.
+    if count_any(counts, LEGACY_SCHEDULED_STATES) > 0:
         update_control(
             control_ws,
-            단계="신규작성대기",
-            결과="기존 완료 글 정리가 끝났습니다. 신규 작성 허용 시간까지 대기합니다.",
-            **values,
-            다음작업=f"{NEW_WINDOW_START_HOUR:02d}:00~{NEW_WINDOW_END_HOUR:02d}:00 {TIMEZONE_NAME} 자동 실행",
+            단계="기존재작성예약발행대기",
+            결과="재작성된 기존 글이 다음 순번에 예약되어 실제 발행을 기다리고 있습니다.",
+            **summary_values(counts),
+            다음작업="예약일 발행 후 자동으로 기존한영수정완료 전환",
             오류="",
         )
-        log("ℹ️ 신규 작성 시간대가 아니므로 상태만 확인하고 종료합니다.")
         return 0
 
-    # No waiting topics: refill before running main.py.
-    if counts.get("대기", 0) == 0 and sum(counts.get(status, 0) for status in REPAIR_STATUSES) == 0:
+    # 4) Repair ordinary English failures before generating new topics.
+    if count_any(counts, ENGLISH_REPAIR_STATES) > 0:
+        update_control(control_ws, 단계="영문복구", 결과="한국어 완료 글의 영문판을 자동 복구합니다.", **summary_values(counts), 다음작업="main.py PROCESS_MODE=english_retry", 오류="")
         code = run_script(
-            "대기 주제 자동 보충",
-            "generate_topics.py",
-            {"TOPIC_COUNT": str(TOPIC_REFILL_COUNT)},
-        )
-        if code != 0:
-            update_control(control_ws, 단계="주제보충오류", 결과=f"종료코드 {code}", **values, 다음작업="다음 예약 실행에서 재시도", 오류="generate_topics.py 실패")
-            return code
-        counts, _ = read_status_counts(topic_ws)
-
-    update_control(
-        control_ws,
-        단계="신규한영작성",
-        결과="대기 또는 재검수 항목 1건 처리 중",
-        **summary_values(counts),
-        다음작업="main.py 실행",
-        오류="",
-    )
-    code = run_script(
-        "신규/재검수 한·영 게시물 작성",
-        "main.py",
-        {
-            "FORCE_IPV4": "true",
-            "ENABLE_ENGLISH": "true",
-            "AUTO_SCHEDULE": "true",
-        },
-    )
-    if code != 0:
-        counts_after, _ = read_status_counts(topic_ws)
-        update_control(
-            control_ws,
-            단계="신규작성오류",
-            결과=f"main.py 종료코드 {code}",
-            **summary_values(counts_after),
-            다음작업="다음 오전 예약 실행에서 자동 재시도",
-            오류="main.py 실행 로그 확인",
+            "영문판 자동 복구",
+            "main.py",
+            {"PROCESS_MODE": "english_retry", "FORCE_IPV4": "true", "ENABLE_ENGLISH": "true", "AUTO_SCHEDULE": "true"},
         )
         return code
 
-    counts_after, _ = read_status_counts(topic_ws)
-    if counts_after.get("대기", 0) < TOPIC_REFILL_THRESHOLD:
-        refill_code = run_script(
-            "주제 목록 자동 보충",
-            "generate_topics.py",
-            {"TOPIC_COUNT": str(TOPIC_REFILL_COUNT)},
+    # 5) New publishing only in the configured morning window.
+    if not new_publish_window_open():
+        update_control(
+            control_ws,
+            단계="신규작성대기",
+            결과="기존 정리가 끝났습니다. 신규 작성 허용 시간까지 대기합니다.",
+            **summary_values(counts),
+            다음작업=f"{NEW_WINDOW_START_HOUR:02d}:00~{NEW_WINDOW_END_HOUR:02d}:00 {TIMEZONE_NAME}",
+            오류="",
         )
+        return 0
+
+    if counts.get("대기", 0) == 0:
+        code = run_script("대기 주제 자동 보충", "generate_topics.py", {"TOPIC_COUNT": str(TOPIC_REFILL_COUNT)})
+        if code != 0:
+            update_control(control_ws, 단계="주제보충오류", 결과=f"종료코드 {code}", **summary_values(counts), 다음작업="다음 실행에서 재시도", 오류="generate_topics.py 실패")
+            return code
+        _, _, counts = read_sheet(topic_ws)
+
+    update_control(control_ws, 단계="신규한영작성", 결과="대기 주제 1건을 작성·검수·예약합니다.", **summary_values(counts), 다음작업="main.py PROCESS_MODE=new", 오류="")
+    code = run_script(
+        "신규 한·영 게시물 작성",
+        "main.py",
+        {"PROCESS_MODE": "new", "FORCE_IPV4": "true", "ENABLE_ENGLISH": "true", "AUTO_SCHEDULE": "true"},
+    )
+    _, _, after = read_sheet(topic_ws)
+    if code == 0 and after.get("대기", 0) < TOPIC_REFILL_THRESHOLD:
+        refill_code = run_script("주제 목록 자동 보충", "generate_topics.py", {"TOPIC_COUNT": str(TOPIC_REFILL_COUNT)})
         if refill_code != 0:
-            log(f"⚠️ 게시물 작성은 완료됐지만 주제 보충은 실패했습니다: {refill_code}")
-        counts_after, _ = read_status_counts(topic_ws)
+            log(f"⚠️ 신규 작성은 완료됐지만 주제 보충은 실패했습니다: {refill_code}")
+        _, _, after = read_sheet(topic_ws)
 
     update_control(
         control_ws,
         단계="신규자동운영",
-        결과="신규/재검수 1건 처리 완료",
-        **summary_values(counts_after),
-        다음작업="다음 오전에 1건 자동 작성",
-        오류="",
+        결과="신규 1건 처리 완료" if code == 0 else f"신규 작성 종료코드 {code}",
+        **summary_values(after),
+        다음작업="다음 오전 자동 실행",
+        오류="" if code == 0 else "main.py 로그 확인",
     )
-    return 0
+    return code
 
 
 if __name__ == "__main__":

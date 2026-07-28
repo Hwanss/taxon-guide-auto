@@ -88,7 +88,12 @@ SCHEDULE_AFTER_DAYS = int(os.getenv("SCHEDULE_AFTER_DAYS", "1"))
 SCHEDULE_INTERVAL_DAYS = int(os.getenv("SCHEDULE_INTERVAL_DAYS", "1"))
 MAX_SCHEDULE_LOOKAHEAD_DAYS = int(os.getenv("MAX_SCHEDULE_LOOKAHEAD_DAYS", "120"))
 MIN_SCHEDULE_LEAD_MINUTES = int(os.getenv("MIN_SCHEDULE_LEAD_MINUTES", "30"))
+MAX_LEGACY_REWRITE_ATTEMPTS = max(1, int(os.getenv("MAX_LEGACY_REWRITE_ATTEMPTS", "3")))
+PROCESS_MODE = os.getenv("PROCESS_MODE", "auto").strip().lower()
 SCHEDULE_TZ = ZoneInfo(SCHEDULE_TIMEZONE)
+
+LEGACY_REWRITE_STATES = {"기존재작성대기", "기존재작성재시도"}
+LEGACY_SCHEDULED_STATES = {"기존한영재예약완료", "기존재예약완료"}
 
 USER_AGENT = f"TaxonGuruEditorialBot/2.0 ({WP_SITE_URL}; {CONTACT_EMAIL})"
 
@@ -132,6 +137,8 @@ EXTRA_HEADERS = [
     "EN_자동검수결과",
     "한영연결",
     "영문오류",
+    "재작성시도",
+    "정리메모",
 ]
 HEADER_ALIASES = {
     "status": ["상태", "진행상태"],
@@ -162,6 +169,8 @@ HEADER_ALIASES = {
     "en_auto_review_result": ["EN_자동검수결과", "영문 자동검수결과"],
     "translation_linked": ["한영연결", "번역연결"],
     "en_error": ["영문오류", "EN_오류"],
+    "rewrite_attempts": ["재작성시도", "재작성 시도"],
+    "cleanup_note": ["정리메모", "정리 메모"],
 }
 
 
@@ -265,6 +274,8 @@ class SheetItem:
     source_count: int
     en_post_id: int | None
     en_quality_score: int
+    rewrite_attempts: int
+    cleanup_note: str
 
 
 @dataclass
@@ -675,6 +686,8 @@ def parse_sheet_item(row_number: int, row: list[str], headers: list[str]) -> She
         source_count=safe_int(value_at(row, headers, "source_count")),
         en_post_id=(safe_int(value_at(row, headers, "en_post_id")) or None),
         en_quality_score=safe_int(value_at(row, headers, "en_quality_score")),
+        rewrite_attempts=safe_int(value_at(row, headers, "rewrite_attempts")),
+        cleanup_note=value_at(row, headers, "cleanup_note"),
     )
 
 
@@ -682,16 +695,35 @@ def choose_sheet_item(worksheet: gspread.Worksheet, headers: list[str]) -> Sheet
     rows = worksheet.get_all_values()[1:]
     items = [parse_sheet_item(i + 2, row, headers) for i, row in enumerate(rows)]
 
-    # 영문만 실패한 행을 먼저 복구한 뒤 신규 주제를 처리합니다.
-    retry_states = {"한국어예약/영문검수필요", "한국어완료/영문검수필요"}
-    for item in items:
-        if item.status in retry_states and item.scientific_name and item.post_id:
-            return item
+    if PROCESS_MODE == "sync_only":
+        return None
 
-    # 하루에 한 건씩 처리합니다. 예약 슬롯은 WordPress의 기존 예약글과 충돌하지 않게 자동 계산합니다.
-    for item in items:
-        if item.status in {"대기", "재작성"} and item.scientific_name:
-            return item
+    # 기존 비공개 글 재작성은 신규 글과 영문 보완보다 항상 먼저 처리합니다.
+    if PROCESS_MODE in {"auto", "legacy_rewrite"}:
+        for item in items:
+            if item.status in LEGACY_REWRITE_STATES and item.scientific_name and item.post_id:
+                return item
+        if PROCESS_MODE == "legacy_rewrite":
+            return None
+
+    # 영문만 실패한 행을 복구합니다.
+    retry_states = {
+        "한국어예약/영문검수필요",
+        "한국어완료/영문검수필요",
+        "기존한국어재예약/영문검수필요",
+    }
+    if PROCESS_MODE in {"auto", "english_retry"}:
+        for item in items:
+            if item.status in retry_states and item.scientific_name and item.post_id:
+                return item
+        if PROCESS_MODE == "english_retry":
+            return None
+
+    # 신규 주제는 기존 정리 대상이 모두 끝난 뒤 컨트롤러가 PROCESS_MODE=new로 실행합니다.
+    if PROCESS_MODE in {"auto", "new"}:
+        for item in items:
+            if item.status in {"대기", "재작성"} and item.scientific_name:
+                return item
     return None
 
 
@@ -1069,7 +1101,7 @@ def upsert_post(
             log(f"  ⚠️ 기존 WordPress 글 ID {existing_post_id} 조회 실패, 슬러그로 다시 찾습니다: {exc}")
     if not existing:
         existing = find_post_by_slug(slug)
-    if existing and existing.get("status") == "publish":
+    if existing and existing.get("status") == "publish" and not existing_post_id:
         raise RuntimeError(f"같은 슬러그의 공개 글이 이미 존재합니다: {existing.get('link')}")
 
     data: dict[str, Any] = {
@@ -1117,7 +1149,7 @@ def sync_scheduled_posts(
     worksheet: gspread.Worksheet,
     headers: list[str],
 ) -> None:
-    """Reflect Korean and English future→publish transitions back into Google Sheets."""
+    """Reflect WordPress future→publish transitions back into Google Sheets."""
     rows = worksheet.get_all_values()[1:]
     for index, row in enumerate(rows, start=2):
         item = parse_sheet_item(index, row, headers)
@@ -1126,6 +1158,7 @@ def sync_scheduled_posts(
         if not item.post_id:
             continue
 
+        legacy_scheduled = item.status in LEGACY_SCHEDULED_STATES or item.status.startswith("기존한국어재예약")
         try:
             ko_post = get_post(item.post_id)
             ko_status = str(ko_post.get("status", ""))
@@ -1140,7 +1173,12 @@ def sync_scheduled_posts(
                 if scheduled:
                     fields["scheduled_date"] = scheduled.strftime("%Y-%m-%d %H:%M %Z")
             elif ko_status == "draft":
-                fields.update({"status": "검수필요", "error": "한국어 예약글이 초안 상태로 변경되었습니다."})
+                if legacy_scheduled:
+                    next_attempt = max(1, item.rewrite_attempts)
+                    next_state = "기존재작성재시도" if next_attempt < MAX_LEGACY_REWRITE_ATTEMPTS else "기존비공개보류"
+                    fields.update({"status": next_state, "error": "재작성 예약글이 초안 상태로 변경되었습니다."})
+                else:
+                    fields.update({"status": "검수필요", "error": "한국어 예약글이 초안 상태로 변경되었습니다."})
 
             if en_post:
                 if en_status == "publish":
@@ -1150,12 +1188,20 @@ def sync_scheduled_posts(
                     if en_scheduled:
                         fields["en_scheduled_date"] = en_scheduled.strftime("%Y-%m-%d %H:%M %Z")
                 elif en_status == "draft" and ko_status == "publish":
-                    fields.update({"status": "한국어완료/영문검수필요", "en_error": "영문 예약글이 초안 상태로 변경되었습니다."})
+                    fields.update({
+                        "status": "기존한국어재예약/영문검수필요" if legacy_scheduled else "한국어완료/영문검수필요",
+                        "en_error": "영문 예약글이 초안 상태로 변경되었습니다.",
+                    })
 
             if ko_status == "publish" and (not ENABLE_ENGLISH or en_status == "publish"):
-                fields.update({"status": "완료", "error": "", "en_error": ""})
+                fields.update({
+                    "status": "기존한영수정완료" if legacy_scheduled else "완료",
+                    "error": "",
+                    "en_error": "",
+                    "cleanup_note": "재작성 글 예약 발행 완료" if legacy_scheduled else item.cleanup_note,
+                })
             elif ko_status == "publish" and en_status == "future":
-                fields["status"] = "한국어공개/영문예약"
+                fields["status"] = "기존한국어공개/영문재예약" if legacy_scheduled else "한국어공개/영문예약"
 
             if fields:
                 update_sheet_fields(worksheet, headers, item.row_number, fields)
@@ -2707,24 +2753,39 @@ def retry_english_article_only(
     if not item.post_id:
         raise RuntimeError("영문 재시도에는 기존 한국어 WP_POST_ID가 필요합니다.")
 
+    legacy_retry = item.status == "기존한국어재예약/영문검수필요"
+    attempt = item.rewrite_attempts + 1 if legacy_retry else item.rewrite_attempts
+    progress_status = "기존영문재작성중" if legacy_retry else "영문재작성중"
+    failure_status = (
+        "기존한국어재예약/영문검수필요"
+        if legacy_retry and attempt < MAX_LEGACY_REWRITE_ATTEMPTS
+        else ("기존비공개보류" if legacy_retry else "한국어예약/영문검수필요")
+    )
+
     log(f"\n🌍 영문 전용 재작성 시작: {item.scientific_name}")
     update_sheet_fields(
-        worksheet,
-        headers,
-        item.row_number,
-        {"status": "영문재작성중", "en_auto_review_result": "", "en_error": ""},
+        worksheet, headers, item.row_number,
+        {
+            "status": progress_status,
+            "rewrite_attempts": attempt if legacy_retry else item.rewrite_attempts,
+            "en_auto_review_result": "",
+            "en_error": "",
+        },
     )
-    # Resize the already scheduled Korean article even if the English retry later fails.
     resize_existing_post_images(item.post_id)
 
     research = research_subject(item)
     if len(research.sources) < MIN_SOURCE_COUNT or len(research.verified_facts) < 4:
         message = f"영문 재작성 자료 부족: 출처 {len(research.sources)}개, 검증 사실 {len(research.verified_facts)}건"
         update_sheet_fields(
-            worksheet,
-            headers,
-            item.row_number,
-            {"status": "한국어예약/영문검수필요", "source_count": len(research.sources), "en_error": message},
+            worksheet, headers, item.row_number,
+            {
+                "status": failure_status,
+                "source_count": len(research.sources),
+                "rewrite_attempts": attempt if legacy_retry else item.rewrite_attempts,
+                "cleanup_note": f"기존 영문 재작성 {attempt}/{MAX_LEGACY_REWRITE_ATTEMPTS}회 실패" if legacy_retry else item.cleanup_note,
+                "en_error": message,
+            },
         )
         log(f"  ⚠️ {message}")
         return
@@ -2732,11 +2793,11 @@ def retry_english_article_only(
     en_article, en_review, _, en_passed, en_summary = process_language_article(item, research, "en")
     if not en_passed:
         update_sheet_fields(
-            worksheet,
-            headers,
-            item.row_number,
+            worksheet, headers, item.row_number,
             {
-                "status": "한국어예약/영문검수필요",
+                "status": failure_status,
+                "rewrite_attempts": attempt if legacy_retry else item.rewrite_attempts,
+                "cleanup_note": f"기존 영문 재작성 {attempt}/{MAX_LEGACY_REWRITE_ATTEMPTS}회 실패" if legacy_retry else item.cleanup_note,
                 "en_quality_score": en_review.score,
                 "en_auto_review_result": en_summary,
                 "en_error": en_summary[:500],
@@ -2781,12 +2842,17 @@ def retry_english_article_only(
     en_edit_url = f"{WP_SITE_URL}/wp-admin/post.php?post={en_post_id}&action=edit"
     en_public_url = linked_payload.get("en_url", en_post.get("link", ""))
     en_scheduled_text = en_scheduled.strftime("%Y-%m-%d %H:%M %Z")
+    ko_post = get_post(item.post_id)
+    ko_status = str(ko_post.get("status", ""))
+    if legacy_retry:
+        next_status = "기존한영재예약완료" if ko_status == "future" else "기존한국어공개/영문재예약"
+    else:
+        next_status = "한영예약완료" if ko_status == "future" else "한국어공개/영문예약"
+
     update_sheet_fields(
-        worksheet,
-        headers,
-        item.row_number,
+        worksheet, headers, item.row_number,
         {
-            "status": "한영예약완료",
+            "status": next_status,
             "source_count": len(research.sources),
             "en_post_id": en_post_id,
             "en_edit_url": en_edit_url,
@@ -2795,6 +2861,8 @@ def retry_english_article_only(
             "en_scheduled_date": en_scheduled_text,
             "en_auto_review_result": en_summary,
             "translation_linked": "완료" if linked else "실패",
+            "rewrite_attempts": attempt if legacy_retry else item.rewrite_attempts,
+            "cleanup_note": f"기존 영문판 재작성 완료, {en_scheduled_text} 예약" if legacy_retry else item.cleanup_note,
             "en_error": "",
         },
     )
@@ -2807,17 +2875,47 @@ def create_or_schedule_post(
     headers: list[str],
     item: SheetItem,
 ) -> None:
-    if item.status in {"한국어예약/영문검수필요", "한국어완료/영문검수필요"}:
+    legacy_rewrite = item.status in LEGACY_REWRITE_STATES
+    legacy_attempt = item.rewrite_attempts + 1 if legacy_rewrite else item.rewrite_attempts
+
+    if item.status in {"한국어예약/영문검수필요", "한국어완료/영문검수필요", "기존한국어재예약/영문검수필요"}:
         retry_english_article_only(worksheet, headers, item)
         return
 
-    log(f"\n🔬 연구 시작: {item.scientific_name}")
+    def legacy_failure(reason: str) -> None:
+        compact = " ".join(str(reason).split())[:900]
+        if item.post_id:
+            try:
+                wp_request("POST", f"posts/{item.post_id}", json={"status": "draft"})
+            except Exception as exc:
+                compact += f" / 한국어 초안 유지 실패: {exc}"
+        if item.en_post_id:
+            try:
+                wp_request("POST", f"posts/{item.en_post_id}", json={"status": "draft"})
+            except Exception as exc:
+                compact += f" / 영어 초안 유지 실패: {exc}"
+        next_state = "기존재작성재시도" if legacy_attempt < MAX_LEGACY_REWRITE_ATTEMPTS else "기존비공개보류"
+        update_sheet_fields(
+            worksheet, headers, item.row_number,
+            {
+                "status": next_state,
+                "rewrite_attempts": legacy_attempt,
+                "cleanup_note": f"재작성 {legacy_attempt}/{MAX_LEGACY_REWRITE_ATTEMPTS}회 실패",
+                "error": compact,
+                "en_error": compact if ENABLE_ENGLISH else "",
+            },
+        )
+        log(f"  ⚠️ 기존 글 재작성 실패({legacy_attempt}/{MAX_LEGACY_REWRITE_ATTEMPTS}): {compact}")
+
+    log(f"\n🔬 연구 시작: {item.scientific_name}" + (f" · 기존 글 재작성 {legacy_attempt}/{MAX_LEGACY_REWRITE_ATTEMPTS}" if legacy_rewrite else ""))
     update_sheet_fields(
         worksheet,
         headers,
         item.row_number,
         {
-            "status": "조사중",
+            "status": "기존재작성중" if legacy_rewrite else "조사중",
+            "rewrite_attempts": legacy_attempt if legacy_rewrite else item.rewrite_attempts,
+            "cleanup_note": "기존 비공개 글 재작성 진행 중" if legacy_rewrite else item.cleanup_note,
             "scheduled_date": "",
             "en_scheduled_date": "",
             "auto_review_result": "",
@@ -2831,6 +2929,9 @@ def create_or_schedule_post(
     research = research_subject(item)
     if len(research.sources) < MIN_SOURCE_COUNT:
         message = f"유효한 출처가 {len(research.sources)}개뿐입니다. 최소 {MIN_SOURCE_COUNT}개가 필요합니다."
+        if legacy_rewrite:
+            legacy_failure(message)
+            return
         update_sheet_fields(
             worksheet,
             headers,
@@ -2846,6 +2947,9 @@ def create_or_schedule_post(
         return
     if len(research.verified_facts) < 4:
         message = "출처가 연결된 검증 사실이 4개 미만입니다."
+        if legacy_rewrite:
+            legacy_failure(message)
+            return
         update_sheet_fields(
             worksheet,
             headers,
@@ -2878,6 +2982,13 @@ def create_or_schedule_post(
             en_generation_error = f"영문 작성 실패: {_short_error(exc)}"
             en_summary = en_generation_error
             log(f"  ⚠️ {en_generation_error}")
+
+    if legacy_rewrite and (not ko_passed or (ENABLE_ENGLISH and (not en_article or not en_review or not en_passed))):
+        reasons = [ko_summary] if not ko_passed else []
+        if ENABLE_ENGLISH and (not en_article or not en_review or not en_passed):
+            reasons.append(en_generation_error or en_summary or "영문 자동검수 미달")
+        legacy_failure(" | ".join(filter(None, reasons)))
+        return
 
     if not ko_passed and not DRAFT_ON_REVIEW_FAILURE:
         update_sheet_fields(
@@ -2992,11 +3103,14 @@ def create_or_schedule_post(
         raise RuntimeError(f"WordPress가 영문 글의 예약 상태를 반환하지 않았습니다. 실제 상태: {en_status}")
 
     if ko_status == "future" and (not ENABLE_ENGLISH or en_status == "future"):
-        next_state = "한영예약완료" if ENABLE_ENGLISH else "예약완료"
+        if legacy_rewrite:
+            next_state = "기존한영재예약완료" if ENABLE_ENGLISH else "기존재예약완료"
+        else:
+            next_state = "한영예약완료" if ENABLE_ENGLISH else "예약완료"
     elif ko_status == "future" and ENABLE_ENGLISH and (en_status == DRAFT_STATUS or en_article is None):
-        next_state = "한국어예약/영문검수필요"
+        next_state = "기존한국어재예약/영문검수필요" if legacy_rewrite else "한국어예약/영문검수필요"
     else:
-        next_state = "검수필요"
+        next_state = "기존재작성재시도" if legacy_rewrite and legacy_attempt < MAX_LEGACY_REWRITE_ATTEMPTS else ("기존비공개보류" if legacy_rewrite else "검수필요")
 
     ko_scheduled_text = ko_scheduled.strftime("%Y-%m-%d %H:%M %Z") if ko_scheduled else ""
     en_scheduled_text = en_scheduled.strftime("%Y-%m-%d %H:%M %Z") if en_scheduled else ""
@@ -3027,11 +3141,18 @@ def create_or_schedule_post(
             "en_auto_review_result": en_summary,
             "translation_linked": "완료" if linked else ("비활성" if not ENABLE_ENGLISH else "실패"),
             "en_error": "" if en_passed or not ENABLE_ENGLISH else (en_generation_error or en_summary)[:500],
+            "rewrite_attempts": legacy_attempt if legacy_rewrite else item.rewrite_attempts,
+            "cleanup_note": (
+                f"기존 글 재작성 완료, 다음 빈 순번 예약: KO {ko_scheduled_text} / EN {en_scheduled_text}"
+                if legacy_rewrite and next_state in LEGACY_SCHEDULED_STATES
+                else item.cleanup_note
+            ),
         },
     )
 
-    if next_state == "한영예약완료":
-        log(f"  🎉 한·영 예약 완료: KO {ko_scheduled_text} / EN {en_scheduled_text}")
+    if next_state in {"한영예약완료", "기존한영재예약완료"}:
+        label = "기존 글 한·영 재예약 완료" if next_state == "기존한영재예약완료" else "한·영 예약 완료"
+        log(f"  🎉 {label}: KO {ko_scheduled_text} / EN {en_scheduled_text}")
         log(f"  🔗 한국어 편집: {ko_edit_url}")
         log(f"  🔗 영어 편집: {en_edit_url}")
     elif next_state == "한국어예약/영문검수필요":
@@ -3076,9 +3197,12 @@ def main() -> int:
         worksheet, headers = connect_sheet()
         ensure_multilingual_backend()
         sync_scheduled_posts(worksheet, headers)
+        if PROCESS_MODE == "sync_only":
+            log("✅ 예약 상태 동기화만 완료했습니다.")
+            return 0
         item = choose_sheet_item(worksheet, headers)
         if not item:
-            log("✅ 처리할 '대기' 또는 '재작성' 항목이 없습니다.")
+            log(f"✅ PROCESS_MODE={PROCESS_MODE}에서 처리할 항목이 없습니다.")
             return 0
 
         create_or_schedule_post(worksheet, headers, item)
@@ -3087,12 +3211,23 @@ def main() -> int:
         log(f"\n❌ 처리 실패: {exc}")
         if worksheet is not None and item is not None:
             try:
-                update_sheet_fields(
-                    worksheet,
-                    headers,
-                    item.row_number,
-                    {"status": "오류", "error": str(exc)[:500]},
-                )
+                if item.status in LEGACY_REWRITE_STATES or item.status == "기존재작성중":
+                    attempts = max(1, item.rewrite_attempts + (0 if item.status == "기존재작성중" else 1))
+                    status = "기존재작성재시도" if attempts < MAX_LEGACY_REWRITE_ATTEMPTS else "기존비공개보류"
+                    update_sheet_fields(
+                        worksheet, headers, item.row_number,
+                        {
+                            "status": status,
+                            "rewrite_attempts": attempts,
+                            "cleanup_note": f"예외 발생으로 재작성 {attempts}/{MAX_LEGACY_REWRITE_ATTEMPTS}회 실패",
+                            "error": str(exc)[:500],
+                        },
+                    )
+                else:
+                    update_sheet_fields(
+                        worksheet, headers, item.row_number,
+                        {"status": "오류", "error": str(exc)[:500]},
+                    )
             except Exception as sheet_error:
                 log(f"  ⚠️ 시트 오류 기록 실패: {sheet_error}")
         return 1

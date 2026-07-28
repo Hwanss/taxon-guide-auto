@@ -64,6 +64,7 @@ AUDIT_TARGET_STATUS = os.getenv("AUDIT_TARGET_STATUS", "").strip()
 AUTO_CLEANUP_MODE = os.getenv("AUTO_CLEANUP_MODE", "false").lower() == "true"
 AUTO_FAIL_CLOSED_DRAFT = os.getenv("AUTO_FAIL_CLOSED_DRAFT", "true").lower() == "true"
 AUTO_TRASH_GRADE_D = os.getenv("AUTO_TRASH_GRADE_D", "false").lower() == "true"
+QUEUE_GRADE_D_FOR_REWRITE = os.getenv("QUEUE_GRADE_D_FOR_REWRITE", "true").lower() == "true"
 
 if FORCE_IPV4:
     # GitHub-hosted runners can occasionally resolve a site to IPv6 even when the route is unavailable.
@@ -226,6 +227,7 @@ class TopicRow:
     slug: str
     post_id: int | None
     en_post_id: int | None
+    rewrite_attempts: int
 
 
 TModel = TypeVar("TModel", bound=BaseModel)
@@ -453,6 +455,7 @@ def load_topic_rows(ws: gspread.Worksheet) -> tuple[list[str], list[TopicRow]]:
                 slug=get_value(row, indexes["slug"]),
                 post_id=safe_int(get_value(row, indexes["post_id"])),
                 en_post_id=safe_int(get_value(row, indexes["en_post_id"])),
+                rewrite_attempts=safe_int(get_value(row, indexes.get("rewrite_attempts"))) or 0,
             )
         )
     return headers, rows
@@ -1101,6 +1104,41 @@ def backup_post(post: dict[str, Any]) -> Path:
     return path
 
 
+def queue_for_rewrite(
+    topic_ws: gspread.Worksheet,
+    topic_headers: list[str],
+    topic: TopicRow | None,
+    post_id: int,
+    en_post_id: int | None,
+    reason: str,
+    *,
+    quality_score: int | str = "",
+    source_count: int = 0,
+) -> str:
+    """Move legacy posts to recoverable drafts and place them in the automatic rewrite queue."""
+    compact = " ".join(str(reason).split())[:900]
+    wp_request("POST", f"posts/{post_id}", json={"status": "draft"})
+    if en_post_id:
+        try:
+            wp_request("POST", f"posts/{en_post_id}", json={"status": "draft"})
+        except Exception as exc:
+            compact += f" / 기존 영문글 초안 전환 실패: {' '.join(str(exc).split())[:250]}"
+    if topic:
+        update_topic_fields(
+            topic_ws, topic_headers, topic.row_number,
+            {
+                "status": "기존재작성대기",
+                "post_id": post_id,
+                "en_post_id": en_post_id or "",
+                "quality_score": quality_score,
+                "source_count": source_count,
+                "cleanup_note": "감사 후 자동 재작성 대기",
+                "error": compact,
+            },
+        )
+    return f"비공개(초안) 전환 후 자동 재작성 대기: {compact}"
+
+
 def process_post(
     post: dict[str, Any],
     topic_ws: gspread.Worksheet,
@@ -1137,31 +1175,19 @@ def process_post(
         update_topic_fields(topic_ws, topic_headers, topic.row_number, fields)
 
     def fail_closed(reason: str) -> str:
-        """Remove an unsafe legacy article from public view without deleting it permanently."""
+        """Hide unsafe legacy content and queue it for automatic reconstruction."""
         compact = " ".join(reason.split())[:900]
         if not (AUTO_CLEANUP_MODE and AUTO_FAIL_CLOSED_DRAFT):
             return compact
         try:
-            wp_request("POST", f"posts/{post_id}", json={"status": "draft"})
-            if topic:
-                update_topic_fields(
-                    topic_ws,
-                    topic_headers,
-                    topic.row_number,
-                    {
-                        "status": "기존비공개완료",
-                        "post_id": post_id,
-                        "public_url": url,
-                        "error": compact,
-                    },
-                )
-            return f"검수 실패로 안전 비공개(초안) 전환: {compact}"
+            return queue_for_rewrite(
+                topic_ws, topic_headers, topic, post_id, topic.en_post_id if topic else None, compact,
+                quality_score=combined_score, source_count=len(sources),
+            )
         except Exception as draft_exc:
             if topic:
                 update_topic_fields(
-                    topic_ws,
-                    topic_headers,
-                    topic.row_number,
+                    topic_ws, topic_headers, topic.row_number,
                     {
                         "status": "기존정리오류",
                         "post_id": post_id,
@@ -1200,114 +1226,35 @@ def process_post(
                     source_count=len(sources),
                 )
 
-            # D: 애드센스 검토 중에는 영구 삭제보다 복구 가능한 비공개가 안전합니다.
+            # D: 영구 삭제하지 않고 초안으로 숨긴 뒤, 기본값에서는 자동 재작성 대기열로 보냅니다.
             elif decision.grade == "D":
-                if DRAFT_GRADE_D or AUTO_CLEANUP_MODE:
-                    if AUTO_TRASH_GRADE_D:
-                        wp_request("DELETE", f"posts/{post_id}", params={"force": "false"})
-                        actual_action = "D등급 휴지통 이동"
-                    else:
-                        wp_request("POST", f"posts/{post_id}", json={"status": "draft"})
-                        actual_action = "D등급 비공개(초안) 전환"
+                if QUEUE_GRADE_D_FOR_REWRITE and scientific_name:
+                    actual_action = queue_for_rewrite(
+                        topic_ws, topic_headers, topic, post_id, topic.en_post_id if topic else None,
+                        "D등급 판정: " + decision.reason,
+                        quality_score=combined_score, source_count=len(sources),
+                    )
+                elif DRAFT_GRADE_D or AUTO_CLEANUP_MODE:
+                    wp_request("POST", f"posts/{post_id}", json={"status": "draft"})
+                    actual_action = "D등급 비공개 보류"
                     update_topic(
-                        "기존비공개완료",
-                        quality_score=combined_score,
-                        source_count=len(sources),
+                        "기존비공개보류",
+                        quality_score=combined_score, source_count=len(sources),
+                        cleanup_note="자동 재작성에 필요한 학명 또는 근거 부족",
                     )
                 else:
                     actual_action = "삭제·통합 검토만 표시(자동 삭제 안 함)"
 
-            # B/C: 기존 URL을 유지하면서 최신 자료로 다시 작성합니다.
+            # B/C: 공개 중단 후 main.py의 최신 한·영 생성기로 넘깁니다.
             elif decision.grade in {"B", "C"}:
                 if not scientific_name:
                     actual_action = fail_closed("학명을 기존 주제 행 또는 본문에서 확인하지 못했습니다.")
-                elif len(sources) < MIN_SOURCE_COUNT:
-                    actual_action = fail_closed(f"유효한 출처가 {len(sources)}개로 최소 {MIN_SOURCE_COUNT}개 미만입니다.")
                 else:
-                    package = build_research_package(scientific_name, title, memo, seed, sources)
-                    used_sources = {
-                        number
-                        for fact in package.verified_facts + package.misconceptions + package.uncertain_claims
-                        for number in fact.source_numbers
-                        if 1 <= number <= len(package.sources)
-                    }
-                    if len(used_sources) < MIN_SOURCE_COUNT:
-                        actual_action = fail_closed(
-                            f"검증 사실에 실제 연결된 출처가 {len(used_sources)}개로 최소 {MIN_SOURCE_COUNT}개 미만입니다."
-                        )
-                    else:
-                        old_to_new: dict[int, int] = {}
-                        selected_sources: list[ResearchSource] = []
-                        for old_num in sorted(used_sources):
-                            old_to_new[old_num] = len(selected_sources) + 1
-                            selected_sources.append(package.sources[old_num - 1])
-                        for fact in package.verified_facts + package.misconceptions + package.uncertain_claims:
-                            fact.source_numbers = [old_to_new[n] for n in fact.source_numbers if n in old_to_new]
-                        package.sources = selected_sources
-
-                        figures = extract_preserved_figures(original_content)
-                        ko_body = generate_article(package, "ko", figures)
-                        ko_meta = generate_meta(package, ko_body, "ko", str(post.get("slug", "")))
-                        ko_review = review_rewrite(ko_body, package, "ko")
-                        if not ko_review.passed:
-                            reason = " | ".join(
-                                (ko_review.critical_errors + ko_review.unsupported_claims + ko_review.style_issues)[:6]
-                            ) or f"한국어 자동검수 {ko_review.score}점"
-                            actual_action = fail_closed("한국어 재작성 검수 미달: " + reason)
-                        else:
-                            ko_content = ko_body + build_references(package, "ko")
-                            payload = {
-                                "title": ko_meta.title,
-                                "excerpt": ko_meta.excerpt or ko_meta.seo_description,
-                                "content": ko_content,
-                                "status": "publish",
-                                "slug": str(post.get("slug", "")),
-                            }
-                            updated_post = wp_request("POST", f"posts/{post_id}", json=payload).json()
-                            actual_action = "한국어 기존 URL 재작성 완료"
-
-                            en_id: int | None = None
-                            en_url = ""
-                            en_score = ""
-                            en_error = ""
-                            if CREATE_ENGLISH:
-                                try:
-                                    en_body = generate_article(package, "en", figures)
-                                    en_meta = generate_meta(package, en_body, "en", "")
-                                    en_review = review_rewrite(en_body, package, "en")
-                                    en_score = str(en_review.score)
-                                    if en_review.passed:
-                                        en_content = en_body + build_references(package, "en")
-                                        en_id, en_url = upsert_english_post(topic, post_id, updated_post, en_meta, en_content)
-                                        actual_action += " / 영어 별도 글 완료"
-                                    else:
-                                        en_error = " | ".join(
-                                            (en_review.critical_errors + en_review.unsupported_claims + en_review.style_issues)[:6]
-                                        )
-                                        actual_action += " / 영어 검수 미달"
-                                except Exception as en_exc:
-                                    en_error = " ".join(str(en_exc).split())[:900]
-                                    actual_action += " / 영어 작성 실패"
-
-                            if topic:
-                                update_fields: dict[str, Any] = {
-                                    "status": "기존한영수정완료" if CREATE_ENGLISH and en_id else "기존수정완료",
-                                    "post_id": post_id,
-                                    "quality_score": ko_review.score,
-                                    "source_count": len(package.sources),
-                                    "public_url": str(updated_post.get("link", url)),
-                                    "error": "",
-                                    "en_error": en_error,
-                                }
-                                if en_id:
-                                    update_fields.update(
-                                        {
-                                            "en_post_id": en_id,
-                                            "en_quality_score": en_score,
-                                            "en_public_url": en_url,
-                                        }
-                                    )
-                                update_topic_fields(topic_ws, topic_headers, topic.row_number, update_fields)
+                    actual_action = queue_for_rewrite(
+                        topic_ws, topic_headers, topic, post_id, topic.en_post_id if topic else None,
+                        f"{decision.grade}등급 자동 재작성 대상: {decision.reason}",
+                        quality_score=combined_score, source_count=len(sources),
+                    )
 
         audit_state = "수정완료" if "완료" in actual_action else ("삭제검토" if decision.grade == "D" else "완료")
         if "비공개" in actual_action or "휴지통" in actual_action:
@@ -1411,17 +1358,17 @@ def main() -> int:
             if row.status.strip() == AUDIT_TARGET_STATUS and row.row_number not in matched_row_numbers
         ]
         for row in unmatched:
+            next_status = "기존재작성대기" if row.post_id and row.scientific_name else "기존비공개보류"
             update_topic_fields(
-                topic_ws,
-                topic_headers,
-                row.row_number,
+                topic_ws, topic_headers, row.row_number,
                 {
-                    "status": "기존비공개완료",
-                    "error": "공개 상태의 WordPress 게시물을 찾지 못해 비공개 완료로 분류했습니다.",
+                    "status": next_status,
+                    "cleanup_note": "공개 게시물 미발견; 기존 ID가 있으면 자동 재작성",
+                    "error": "공개 상태의 WordPress 게시물을 찾지 못했습니다.",
                 },
             )
         if unmatched:
-            log(f"ℹ️ 공개 게시물 미발견 행 {len(unmatched)}건을 '기존비공개완료'로 정리했습니다.")
+            log(f"ℹ️ 공개 게시물 미발견 행 {len(unmatched)}건을 재작성대기 또는 비공개보류로 분류했습니다.")
 
         targets = []
         for post in posts:
