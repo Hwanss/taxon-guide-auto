@@ -57,6 +57,8 @@ PREFER_AI_FEATURED_IMAGE = os.getenv("PREFER_AI_FEATURED_IMAGE", "true").lower()
 GENERATE_AI_BODY_IMAGES = os.getenv("GENERATE_AI_BODY_IMAGES", "true").lower() == "true"
 ALLOW_HISTORICAL_BODY_IMAGES = os.getenv("ALLOW_HISTORICAL_BODY_IMAGES", "false").lower() == "true"
 MIN_BODY_IMAGES = max(0, int(os.getenv("MIN_BODY_IMAGES", "2")))
+BODY_IMAGE_MAX_WIDTH = max(320, int(os.getenv("BODY_IMAGE_MAX_WIDTH", "720")))
+BODY_IMAGE_MAX_HEIGHT = max(240, int(os.getenv("BODY_IMAGE_MAX_HEIGHT", "520")))
 AI_IMAGE_QUALITY = os.getenv("AI_IMAGE_QUALITY", "medium")
 AUTO_SCHEDULE = os.getenv("AUTO_SCHEDULE", "true").lower() == "true"
 DRAFT_ON_REVIEW_FAILURE = os.getenv("DRAFT_ON_REVIEW_FAILURE", "true").lower() == "true"
@@ -448,10 +450,28 @@ Return exactly one complete JSON object matching the schema. Do not echo the pro
     )
 
 
+def normalize_model_citations(fragment: str) -> str:
+    """Normalize citation styles models commonly emit into [n] markers.
+
+    This keeps English generation from failing merely because the model used
+    Unicode brackets, superscript numbers, or labels such as [Source 1].
+    """
+    value = fragment or ""
+    value = re.sub(r"【\s*(\d{1,2})\s*】", r"[\1]", value)
+    value = re.sub(r"〔\s*(\d{1,2})\s*〕", r"[\1]", value)
+    value = re.sub(r"\[\s*(?:source|ref(?:erence)?)\s*(\d{1,2})\s*\]", r"[\1]", value, flags=re.IGNORECASE)
+    value = re.sub(r"\(\s*(?:source|ref(?:erence)?)\s*(\d{1,2})\s*\)", r"[\1]", value, flags=re.IGNORECASE)
+    value = re.sub(r"<sup[^>]*>\s*\[?(\d{1,2})\]?\s*</sup>", r"[\1]", value, flags=re.IGNORECASE)
+    value = re.sub(r"\[\^(\d{1,2})\]", r"[\1]", value)
+    value = re.sub(r"\[\s*(\d{1,2})\s*[,;/]\s*(\d{1,2})\s*\]", r"[\1][\2]", value)
+    return value
+
+
 def _clean_model_html(raw: str) -> str:
     value = (raw or "").strip()
     value = re.sub(r"^```(?:html)?\s*", "", value, flags=re.IGNORECASE)
     value = re.sub(r"\s*```$", "", value)
+    value = normalize_model_citations(value)
     return sanitize_html(value.strip())
 
 
@@ -654,6 +674,12 @@ def parse_sheet_item(row_number: int, row: list[str], headers: list[str]) -> She
 def choose_sheet_item(worksheet: gspread.Worksheet, headers: list[str]) -> SheetItem | None:
     rows = worksheet.get_all_values()[1:]
     items = [parse_sheet_item(i + 2, row, headers) for i, row in enumerate(rows)]
+
+    # 영문만 실패한 행을 먼저 복구한 뒤 신규 주제를 처리합니다.
+    retry_states = {"한국어예약/영문검수필요", "한국어완료/영문검수필요"}
+    for item in items:
+        if item.status in retry_states and item.scientific_name and item.post_id:
+            return item
 
     # 하루에 한 건씩 처리합니다. 예약 슬롯은 WordPress의 기존 예약글과 충돌하지 않게 자동 계산합니다.
     for item in items:
@@ -1465,7 +1491,7 @@ def article_body_generation_issues(raw_html: str, language: Literal["ko", "en"])
         return issues
     if body.count("[[IMAGE_1]]") != 1 or body.count("[[IMAGE_2]]") != 1:
         issues.append("[[IMAGE_1]]과 [[IMAGE_2]]를 각각 정확히 한 번 포함해야 합니다.")
-    if len(re.findall(r"\[(\d{1,2})\]", body)) < MIN_CITATION_MARKERS:
+    if len(citation_numbers(body)) < MIN_CITATION_MARKERS:
         issues.append(f"출처 번호가 최소 {MIN_CITATION_MARKERS}개 필요합니다.")
     if language == "ko":
         if len(plain) < MIN_KOREAN_CHARS:
@@ -1479,6 +1505,157 @@ def article_body_generation_issues(raw_html: str, language: Literal["ko", "en"])
         if re.search(r"[가-힣]", plain):
             issues.append("영문 본문에 한국어 문자가 포함되어 있습니다.")
     return issues
+
+
+def citation_numbers(fragment: str) -> list[int]:
+    cleaned = normalize_model_citations(fragment or "")
+    return [safe_int(value) for value in re.findall(r"\[(\d{1,2})\]", cleaned)]
+
+
+def _fact_tokens(value: str) -> set[str]:
+    return {
+        token.casefold()
+        for token in re.findall(r"[A-Za-z]{4,}|[가-힣]{2,}", strip_html(value or ""))
+        if token.casefold() not in {"this", "that", "with", "from", "have", "their", "about", "which", "these"}
+    }
+
+
+def inject_grounded_citations(body_html: str, research: ResearchPackage, required: int) -> str:
+    """Deterministically add valid citations to matching factual paragraphs.
+
+    The function only uses source numbers already attached to verified facts.
+    It is a final safety net after the model citation-repair pass.
+    """
+    body = _clean_model_html(body_html)
+    existing = citation_numbers(body)
+    if len(existing) >= required:
+        return body
+
+    fact_rows: list[tuple[set[str], list[int]]] = []
+    fallback_numbers: list[int] = []
+    for fact in research.verified_facts:
+        valid = [n for n in fact.source_numbers if 1 <= n <= len(research.sources)]
+        if valid:
+            fact_rows.append((_fact_tokens(fact.claim), valid))
+            fallback_numbers.extend(valid)
+    for fact in research.common_misconceptions:
+        valid = [n for n in fact.source_numbers if 1 <= n <= len(research.sources)]
+        if valid:
+            fact_rows.append((_fact_tokens(fact.claim), valid))
+            fallback_numbers.extend(valid)
+    for fact in research.disputed_or_uncertain:
+        valid = [n for n in fact.source_numbers if 1 <= n <= len(research.sources)]
+        if valid:
+            fact_rows.append((_fact_tokens(fact.claim), valid))
+            fallback_numbers.extend(valid)
+
+    fallback_numbers = list(dict.fromkeys(fallback_numbers)) or list(range(1, min(len(research.sources), required) + 1))
+    used = set(existing)
+    current_count = len(existing)
+    paragraph_pattern = re.compile(r"(<p(?:\s[^>]*)?>)(.*?)(</p>)", flags=re.IGNORECASE | re.DOTALL)
+
+    def choose_number(inner: str, *, allow_fallback: bool) -> int | None:
+        tokens = _fact_tokens(inner)
+        best_numbers: list[int] = []
+        best_score = 0
+        for fact_tokens, numbers in fact_rows:
+            score = len(tokens & fact_tokens)
+            if score > best_score:
+                best_score = score
+                best_numbers = numbers
+        if best_score > 0:
+            number = next((n for n in best_numbers if n not in used), None)
+            if number is not None:
+                return number
+            if best_numbers:
+                return best_numbers[0]
+        if allow_fallback:
+            return next((n for n in fallback_numbers if n not in used), None)
+        return None
+
+    def grounded_add(match: re.Match[str]) -> str:
+        nonlocal current_count
+        opening, inner, closing = match.groups()
+        if current_count >= required or citation_numbers(inner):
+            return match.group(0)
+        if len(strip_html(inner)) < 80:
+            return match.group(0)
+        number = choose_number(inner, allow_fallback=False)
+        if number is None:
+            return match.group(0)
+        used.add(number)
+        current_count += 1
+        return f"{opening}{inner.rstrip()} [{number}]{closing}"
+
+    repaired = paragraph_pattern.sub(grounded_add, body)
+
+    # If lexical matching was too strict, use still-valid source numbers on long
+    # factual paragraphs. This does not invent any source number.
+    if current_count < required:
+        def fallback_add(match: re.Match[str]) -> str:
+            nonlocal current_count
+            opening, inner, closing = match.groups()
+            if current_count >= required or citation_numbers(inner):
+                return match.group(0)
+            if len(strip_html(inner)) < 120:
+                return match.group(0)
+            number = choose_number(inner, allow_fallback=True)
+            if number is None:
+                return match.group(0)
+            used.add(number)
+            current_count += 1
+            return f"{opening}{inner.rstrip()} [{number}]{closing}"
+        repaired = paragraph_pattern.sub(fallback_add, repaired)
+
+    return _clean_model_html(repaired)
+
+
+def repair_article_citations(
+    item: SheetItem,
+    research: ResearchPackage,
+    body_html: str,
+    language: Literal["ko", "en"],
+) -> str:
+    body = _clean_model_html(body_html)
+    if len(citation_numbers(body)) >= MIN_CITATION_MARKERS:
+        return body
+
+    language_instruction = (
+        "본문의 문장과 구조를 바꾸지 말고, 검증된 사실 문장 끝에 유효한 [번호] 인용만 추가하라."
+        if language == "ko"
+        else "Keep the wording and HTML structure unchanged. Add only valid [number] citations after source-backed factual sentences."
+    )
+    prompt = f"""
+{language_instruction}
+- Use only source numbers that exist in the source map.
+- Add at least {MIN_CITATION_MARKERS} citation markers in total, preferably using different sources.
+- Preserve [[IMAGE_1]] and [[IMAGE_2]] exactly once each.
+- Return complete WordPress body HTML only.
+
+Source map:
+{compact_research_payload(research)}
+
+Article HTML:
+{body}
+"""
+    try:
+        repaired = gemini_text(
+            WRITER_MODEL,
+            prompt,
+            max_output_tokens=ARTICLE_MAX_OUTPUT_TOKENS,
+            temperature=0.05,
+            attempts=2,
+            validator=lambda value: [
+                issue for issue in article_body_generation_issues(value, language)
+                if "출처 번호" in issue or "IMAGE_" in issue or "짧습니다" in issue or "한국어 문자가" in issue
+            ],
+        )
+        body = _clean_model_html(repaired)
+    except Exception as exc:
+        log(f"  ⚠️ 인용 복구 모델 패스 실패, 결정적 보정으로 전환: {_short_error(exc)}")
+
+    body = inject_grounded_citations(body, research, MIN_CITATION_MARKERS)
+    return body
 
 
 def metadata_issues(metadata: ArticleMetadata) -> list[str]:
@@ -1544,7 +1721,7 @@ Non-negotiable rules
 2. Never add flattering labels such as “legendary,” “imperial,” or “pioneering” to a person unless the supplied sources explicitly support that description.
 3. Describe color or appearance only when it appears in the verified package. Do not fill gaps for atmosphere.
 4. If the research is limited, narrow the story rather than supplementing it with unsupported general knowledge.
-5. Attach valid source markers such as [1] and [2] to every important factual claim.
+5. Attach valid source markers such as [1] and [2] to every important factual claim. Before returning, verify that the article contains at least four literal square-bracket markers, for example [1], [2], [3], and [4]. Do not use Unicode citation brackets or linked citation syntax.
 6. Clearly distinguish confirmed evidence from uncertainty or dispute.
 7. Open with a scene, question, or surprising source-backed fact—not a report-style summary.
 8. Use four to seven topic-specific headings and compact paragraphs, usually two to four sentences.
@@ -1581,14 +1758,28 @@ def generate_article_body(
     *,
     revision_context: str = "",
 ) -> str:
+    # Do not discard a complete long article solely because citation syntax is
+    # missing or formatted differently. Generate the article first, then run a
+    # dedicated citation-repair pass and a deterministic grounded fallback.
+    def base_issues(value: str) -> list[str]:
+        return [
+            issue for issue in article_body_generation_issues(value, language)
+            if "출처 번호" not in issue
+        ]
+
     raw = gemini_text(
         WRITER_MODEL,
         article_body_prompt(item, research, language, revision_context=revision_context),
         max_output_tokens=ARTICLE_MAX_OUTPUT_TOKENS,
         temperature=0.65,
-        validator=lambda value: article_body_generation_issues(value, language),
+        validator=base_issues,
     )
-    return _clean_model_html(raw)
+    body = _clean_model_html(raw)
+    body = repair_article_citations(item, research, body, language)
+    final_issues = article_body_generation_issues(body, language)
+    if final_issues:
+        raise RuntimeError("; ".join(final_issues[:8]))
+    return body
 
 
 def generate_article_metadata(
@@ -2104,12 +2295,78 @@ def prepare_article_media(item: SheetItem, research: ResearchPackage) -> list[Up
     return uploaded
 
 
+def apply_body_image_size_styles(content_html: str) -> str:
+    """Apply responsive display limits to TaxonGuru body image figures."""
+    figure_style = f"max-width:{BODY_IMAGE_MAX_WIDTH}px;margin:28px auto;text-align:center;"
+    image_style = (
+        "display:block;width:100%;height:auto;"
+        f"max-height:{BODY_IMAGE_MAX_HEIGHT}px;object-fit:contain;"
+        "margin:0 auto;border-radius:12px;"
+    )
+    caption_style = "font-size:0.9em;line-height:1.55;margin-top:8px;"
+
+    figure_pattern = re.compile(
+        r'<figure(?P<attrs>[^>]*class=["\'][^"\']*taxonguru-source-image[^"\']*["\'][^>]*)>(?P<body>.*?)</figure>',
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+    def strip_attr(attrs: str, name: str) -> str:
+        attrs = re.sub(rf'\s{name}="[^"]*"', "", attrs, flags=re.IGNORECASE | re.DOTALL)
+        attrs = re.sub(rf"\s{name}='[^']*'", "", attrs, flags=re.IGNORECASE | re.DOTALL)
+        return attrs
+
+    def figure_repl(match: re.Match[str]) -> str:
+        attrs = strip_attr(match.group("attrs"), "style")
+        body = match.group("body")
+        attrs += f' style="{figure_style}"'
+
+        def img_repl(img_match: re.Match[str]) -> str:
+            img_attrs = strip_attr(img_match.group(1), "width")
+            img_attrs = strip_attr(img_attrs, "style")
+            return f'<img{img_attrs} width="{BODY_IMAGE_MAX_WIDTH}" style="{image_style}">'
+
+        def caption_repl(caption_match: re.Match[str]) -> str:
+            caption_attrs = strip_attr(caption_match.group(1), "style")
+            return f'<figcaption{caption_attrs} style="{caption_style}">'
+
+        body = re.sub(r"<img([^>]*)>", img_repl, body, count=1, flags=re.IGNORECASE | re.DOTALL)
+        body = re.sub(r"<figcaption([^>]*)>", caption_repl, body, count=1, flags=re.IGNORECASE | re.DOTALL)
+        return f"<figure{attrs}>{body}</figure>"
+
+    return figure_pattern.sub(figure_repl, content_html or "")
+
+
+def resize_existing_post_images(post_id: int | None) -> None:
+    if not post_id:
+        return
+    try:
+        post = wp_request("GET", f"posts/{post_id}", params={"context": "edit"}).json()
+        content_obj = post.get("content", {})
+        raw = content_obj.get("raw") or content_obj.get("rendered") or ""
+        resized = apply_body_image_size_styles(raw)
+        if resized and resized != raw:
+            wp_request("POST", f"posts/{post_id}", json={"content": resized})
+            log(f"  ↔️ 기존 게시물 본문 이미지 크기 조정 완료: Post ID {post_id}")
+    except Exception as exc:
+        log(f"  ⚠️ 기존 게시물 이미지 크기 조정 실패(Post {post_id}): {_short_error(exc)}")
+
+
 def figure_html(media: UploadedMedia, alt_text: str, language: Literal["ko", "en"]) -> str:
     caption = media.caption_ko if language == "ko" else media.caption_en
+    figure_style = (
+        f"max-width:{BODY_IMAGE_MAX_WIDTH}px;margin:28px auto;text-align:center;"
+    )
+    image_style = (
+        "display:block;width:100%;height:auto;"
+        f"max-height:{BODY_IMAGE_MAX_HEIGHT}px;object-fit:contain;"
+        "margin:0 auto;border-radius:12px;"
+    )
     return (
-        '<figure class="taxonguru-source-image">'
-        f'<img src="{html.escape(media.source_url, quote=True)}" alt="{html.escape(alt_text, quote=True)}" loading="lazy">'
-        f"<figcaption>{caption}</figcaption>"
+        f'<figure class="taxonguru-source-image" style="{figure_style}">'
+        f'<img src="{html.escape(media.source_url, quote=True)}" '
+        f'alt="{html.escape(alt_text, quote=True)}" loading="lazy" '
+        f'width="{BODY_IMAGE_MAX_WIDTH}" style="{image_style}">'
+        f'<figcaption style="font-size:0.9em;line-height:1.55;margin-top:8px;">{caption}</figcaption>'
         "</figure>"
     )
 
@@ -2124,7 +2381,7 @@ def deterministic_quality_issues(
 ) -> list[str]:
     issues: list[str] = []
     plain_text = strip_html(article.html_body)
-    citation_markers = re.findall(r"\[(\d{1,2})\]", article.html_body)
+    citation_markers = [str(number) for number in citation_numbers(article.html_body)]
 
     if not article.title.strip():
         issues.append("제목이 비어 있습니다.")
@@ -2246,6 +2503,7 @@ def compose_public_content(
         else:
             body = body.replace(placeholder, "", 1)
 
+    body = apply_body_image_size_styles(body)
     body = replace_citation_markers(body, len(research.sources))
     featured_credit = ""
     if uploaded:
@@ -2268,11 +2526,119 @@ def compose_public_content(
     )
 
 
+def retry_english_article_only(
+    worksheet: gspread.Worksheet,
+    headers: list[str],
+    item: SheetItem,
+) -> None:
+    """Repair and schedule only the English article without touching Korean."""
+    if not item.post_id:
+        raise RuntimeError("영문 재시도에는 기존 한국어 WP_POST_ID가 필요합니다.")
+
+    log(f"\n🌍 영문 전용 재작성 시작: {item.scientific_name}")
+    update_sheet_fields(
+        worksheet,
+        headers,
+        item.row_number,
+        {"status": "영문재작성중", "en_auto_review_result": "", "en_error": ""},
+    )
+    # Resize the already scheduled Korean article even if the English retry later fails.
+    resize_existing_post_images(item.post_id)
+
+    research = research_subject(item)
+    if len(research.sources) < MIN_SOURCE_COUNT or len(research.verified_facts) < 4:
+        message = f"영문 재작성 자료 부족: 출처 {len(research.sources)}개, 검증 사실 {len(research.verified_facts)}건"
+        update_sheet_fields(
+            worksheet,
+            headers,
+            item.row_number,
+            {"status": "한국어예약/영문검수필요", "source_count": len(research.sources), "en_error": message},
+        )
+        log(f"  ⚠️ {message}")
+        return
+
+    en_article, en_review, _, en_passed, en_summary = process_language_article(item, research, "en")
+    if not en_passed:
+        update_sheet_fields(
+            worksheet,
+            headers,
+            item.row_number,
+            {
+                "status": "한국어예약/영문검수필요",
+                "en_quality_score": en_review.score,
+                "en_auto_review_result": en_summary,
+                "en_error": en_summary[:500],
+            },
+        )
+        log(f"  ⚠️ 영문 재작성 품질 기준 미달: {en_summary}")
+        return
+
+    uploaded = prepare_article_media(item, research)
+    featured_media = uploaded[0].media_id if uploaded else None
+    en_scheduled = calculate_next_schedule_datetime(ENGLISH_PUBLISH_HOUR, ENGLISH_PUBLISH_MINUTE)
+    en_content = compose_public_content(en_article, research, uploaded, "en", en_scheduled, en_review, en_summary)
+    en_category_id = get_or_create_wp_term(english_category_name(item.category), "categories")
+    fallback_en_tags = [research.common_name_en, item.scientific_name, english_category_name(item.category)]
+    en_tag_names = list(dict.fromkeys([tag for tag in en_article.tags + fallback_en_tags if tag]))[:12]
+    en_tag_ids = [term_id for tag in en_tag_names if (term_id := get_or_create_wp_term(tag, "tags"))]
+    ko_slug = item.slug or slugify(research.accepted_scientific_name or item.scientific_name)
+    en_slug = en_article.slug or slugify(research.common_name_en) or f"{ko_slug}-english"
+    if en_slug == ko_slug:
+        en_slug = f"{en_slug}-english"
+
+    en_post = upsert_post(
+        slug=en_slug,
+        title=en_article.title,
+        excerpt=en_article.excerpt or en_article.seo_description,
+        content=en_content,
+        featured_media=featured_media,
+        category_id=en_category_id,
+        tag_ids=en_tag_ids,
+        publish_mode="future",
+        scheduled_at=en_scheduled,
+        post_meta={"_taxonguru_language": "en", "_taxonguru_translation_id": item.post_id},
+        existing_post_id=item.en_post_id,
+    )
+    en_post_id = int(en_post["id"])
+    en_status = str(en_post.get("status", DRAFT_STATUS))
+    if en_status != "future":
+        raise RuntimeError(f"WordPress가 영문 글의 예약 상태를 반환하지 않았습니다. 실제 상태: {en_status}")
+
+    linked_payload = link_translation_posts(item.post_id, en_post_id)
+    linked = bool(linked_payload.get("linked"))
+    en_edit_url = f"{WP_SITE_URL}/wp-admin/post.php?post={en_post_id}&action=edit"
+    en_public_url = linked_payload.get("en_url", en_post.get("link", ""))
+    en_scheduled_text = en_scheduled.strftime("%Y-%m-%d %H:%M %Z")
+    update_sheet_fields(
+        worksheet,
+        headers,
+        item.row_number,
+        {
+            "status": "한영예약완료",
+            "source_count": len(research.sources),
+            "en_post_id": en_post_id,
+            "en_edit_url": en_edit_url,
+            "en_public_url": en_public_url,
+            "en_quality_score": en_review.score,
+            "en_scheduled_date": en_scheduled_text,
+            "en_auto_review_result": en_summary,
+            "translation_linked": "완료" if linked else "실패",
+            "en_error": "",
+        },
+    )
+    log(f"  🎉 영문 예약 복구 완료: {en_scheduled_text}")
+    log(f"  🔗 영어 편집: {en_edit_url}")
+
+
 def create_or_schedule_post(
     worksheet: gspread.Worksheet,
     headers: list[str],
     item: SheetItem,
 ) -> None:
+    if item.status in {"한국어예약/영문검수필요", "한국어완료/영문검수필요"}:
+        retry_english_article_only(worksheet, headers, item)
+        return
+
     log(f"\n🔬 연구 시작: {item.scientific_name}")
     update_sheet_fields(
         worksheet,
@@ -2527,7 +2893,7 @@ def main() -> int:
         f"자동 예약: {'ON' if AUTO_SCHEDULE else 'OFF'} · 기준 {MIN_QUALITY_SCORE}점/출처 {MIN_SOURCE_COUNT}개 · "
         f"KO {PUBLISH_HOUR:02d}:{PUBLISH_MINUTE:02d} / EN {ENGLISH_PUBLISH_HOUR:02d}:{ENGLISH_PUBLISH_MINUTE:02d} "
         f"{SCHEDULE_TIMEZONE} · 영어 {'ON' if ENABLE_ENGLISH else 'OFF'} · "
-        f"AI 대표 {'ON' if ALLOW_AI_FEATURED_IMAGE else 'OFF'} / AI 본문 {'ON' if GENERATE_AI_BODY_IMAGES else 'OFF'}"
+        f"AI 대표 {'ON' if ALLOW_AI_FEATURED_IMAGE else 'OFF'} / AI 본문 {'ON' if GENERATE_AI_BODY_IMAGES else 'OFF'} · 본문 이미지 최대 {BODY_IMAGE_MAX_WIDTH}px"
     )
     log("=" * 70)
 
