@@ -45,6 +45,10 @@ jobs:
           AUTO_SCHEDULE: 'true'
           ENABLE_ENGLISH: 'true'
           MULTILINGUAL_BACKEND: 'taxonguru_bridge'
+          # status 경로가 보안·캐시 계층에서 일시 차단되어도 최종 메타 연결로 재확인합니다.
+          BRIDGE_PREFLIGHT_STRICT: 'false'
+          BRIDGE_CHECK_RETRIES: '3'
+          BRIDGE_RETRY_DELAY_SECONDS: '2'
           DRAFT_ON_REVIEW_FAILURE: 'true'
           ALLOW_AI_FEATURED_IMAGE: 'true'
           PREFER_AI_FEATURED_IMAGE: 'true'
