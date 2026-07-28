@@ -14,7 +14,7 @@ on:
 jobs:
   scheduled-publisher:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -46,7 +46,12 @@ jobs:
           ENABLE_ENGLISH: 'true'
           MULTILINGUAL_BACKEND: 'taxonguru_bridge'
           DRAFT_ON_REVIEW_FAILURE: 'true'
-          ALLOW_AI_FEATURED_IMAGE: 'false'
+          ALLOW_AI_FEATURED_IMAGE: 'true'
+          PREFER_AI_FEATURED_IMAGE: 'true'
+          GENERATE_AI_BODY_IMAGES: 'true'
+          ALLOW_HISTORICAL_BODY_IMAGES: 'false'
+          MIN_BODY_IMAGES: '2'
+          AI_IMAGE_QUALITY: 'medium'
 
           SCHEDULE_TIMEZONE: 'Asia/Seoul'
           PUBLISH_HOUR: '9'
@@ -63,4 +68,12 @@ jobs:
           MIN_KOREAN_CHARS: '2200'
           MIN_ENGLISH_WORDS: '850'
           MIN_CITATION_MARKERS: '4'
+
+          MAX_STRUCTURED_ATTEMPTS: '3'
+          MAX_TEXT_ATTEMPTS: '3'
+          MAX_REWRITE_ROUNDS: '2'
+          GEMINI_RESEARCH_MAX_OUTPUT_TOKENS: '8192'
+          GEMINI_ARTICLE_MAX_OUTPUT_TOKENS: '12288'
+          GEMINI_METADATA_MAX_OUTPUT_TOKENS: '2048'
+          GEMINI_REVIEW_MAX_OUTPUT_TOKENS: '4096'
         run: python main.py
