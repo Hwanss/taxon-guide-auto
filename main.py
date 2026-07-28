@@ -12,7 +12,7 @@ import unicodedata
 import warnings
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal
+from typing import Any, Callable, Literal, TypeVar
 from zoneinfo import ZoneInfo
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
@@ -52,11 +52,23 @@ MIN_ENGLISH_WORDS = int(os.getenv("MIN_ENGLISH_WORDS", "850"))
 MIN_CITATION_MARKERS = int(os.getenv("MIN_CITATION_MARKERS", "4"))
 ENABLE_ENGLISH = os.getenv("ENABLE_ENGLISH", "true").lower() == "true"
 MULTILINGUAL_BACKEND = os.getenv("MULTILINGUAL_BACKEND", "taxonguru_bridge")
-ALLOW_AI_FEATURED_IMAGE = os.getenv("ALLOW_AI_FEATURED_IMAGE", "false").lower() == "true"
+ALLOW_AI_FEATURED_IMAGE = os.getenv("ALLOW_AI_FEATURED_IMAGE", "true").lower() == "true"
+PREFER_AI_FEATURED_IMAGE = os.getenv("PREFER_AI_FEATURED_IMAGE", "true").lower() == "true"
+GENERATE_AI_BODY_IMAGES = os.getenv("GENERATE_AI_BODY_IMAGES", "true").lower() == "true"
+ALLOW_HISTORICAL_BODY_IMAGES = os.getenv("ALLOW_HISTORICAL_BODY_IMAGES", "false").lower() == "true"
+MIN_BODY_IMAGES = max(0, int(os.getenv("MIN_BODY_IMAGES", "2")))
+AI_IMAGE_QUALITY = os.getenv("AI_IMAGE_QUALITY", "medium")
 AUTO_SCHEDULE = os.getenv("AUTO_SCHEDULE", "true").lower() == "true"
 DRAFT_ON_REVIEW_FAILURE = os.getenv("DRAFT_ON_REVIEW_FAILURE", "true").lower() == "true"
 DRAFT_STATUS = os.getenv("WP_DRAFT_STATUS", "draft")
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "45"))
+MAX_STRUCTURED_ATTEMPTS = max(1, int(os.getenv("MAX_STRUCTURED_ATTEMPTS", "3")))
+MAX_TEXT_ATTEMPTS = max(1, int(os.getenv("MAX_TEXT_ATTEMPTS", "3")))
+MAX_REWRITE_ROUNDS = max(0, int(os.getenv("MAX_REWRITE_ROUNDS", "2")))
+RESEARCH_MAX_OUTPUT_TOKENS = int(os.getenv("GEMINI_RESEARCH_MAX_OUTPUT_TOKENS", "8192"))
+ARTICLE_MAX_OUTPUT_TOKENS = int(os.getenv("GEMINI_ARTICLE_MAX_OUTPUT_TOKENS", "12288"))
+METADATA_MAX_OUTPUT_TOKENS = int(os.getenv("GEMINI_METADATA_MAX_OUTPUT_TOKENS", "2048"))
+REVIEW_MAX_OUTPUT_TOKENS = int(os.getenv("GEMINI_REVIEW_MAX_OUTPUT_TOKENS", "4096"))
 
 SCHEDULE_TIMEZONE = os.getenv("SCHEDULE_TIMEZONE", "Asia/Seoul")
 PUBLISH_HOUR = int(os.getenv("PUBLISH_HOUR", "9"))
@@ -207,6 +219,14 @@ class ArticleDraft(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class ArticleMetadata(BaseModel):
+    title: str = ""
+    slug: str = ""
+    excerpt: str = ""
+    seo_description: str = ""
+    tags: list[str] = Field(default_factory=list)
+
+
 class QualityReview(BaseModel):
     score: int = 0
     pass_review: bool = False
@@ -336,45 +356,157 @@ def replace_citation_markers(fragment: str, source_count: int) -> str:
     return re.sub(r"\[(\d{1,2})\]", repl, fragment)
 
 
-def gemini_structured(
+TModel = TypeVar("TModel", bound=BaseModel)
+
+
+def _short_error(exc: Exception, limit: int = 600) -> str:
+    return " ".join(str(exc).split())[:limit]
+
+
+def _response_finish_reason(response: Any) -> str:
+    try:
+        candidates = getattr(response, "candidates", None) or []
+        if not candidates:
+            return ""
+        reason = getattr(candidates[0], "finish_reason", "")
+        return str(reason or "")
+    except Exception:
+        return ""
+
+
+def _extract_response_text(response: Any) -> str:
+    text_value = str(getattr(response, "text", "") or "").strip()
+    if not text_value:
+        raise ValueError("모델 응답 본문이 비어 있습니다.")
+    return text_value
+
+
+def gemini_json(
     model: str,
     prompt: str,
-    schema: type[BaseModel],
-    tools_list: list[str] | None = None,
-) -> BaseModel:
-    """Use the current Interactions API; fall back to generateContent if needed."""
-    tools_list = tools_list or []
-    try:
-        interaction_kwargs: dict[str, Any] = {
-            "model": model,
-            "input": prompt,
-            "response_format": {
-                "type": "text",
-                "mime_type": "application/json",
-                "schema": schema.model_json_schema(),
-            },
-        }
-        if tools_list:
-            interaction_kwargs["tools"] = [{"type": tool_name} for tool_name in tools_list]
-        interaction = gemini_client.interactions.create(**interaction_kwargs)
-        return schema.model_validate_json(interaction.output_text)
-    except Exception as interaction_error:
-        log(f"  ⚠️ Interactions API 재시도: {interaction_error}")
-        fallback_tools = []
-        if "google_search" in tools_list:
-            fallback_tools.append(types.Tool(google_search=types.GoogleSearch()))
-        config_kwargs: dict[str, Any] = {
-            "response_mime_type": "application/json",
-            "response_schema": schema,
-        }
-        if fallback_tools:
-            config_kwargs["tools"] = fallback_tools
-        response = gemini_client.models.generate_content(
-            model=model,
-            contents=prompt,
-            config=types.GenerateContentConfig(**config_kwargs),
-        )
-        return schema.model_validate_json(response.text)
+    schema: type[TModel],
+    *,
+    max_output_tokens: int,
+    temperature: float = 0.2,
+    validator: Callable[[TModel], list[str]] | None = None,
+    attempts: int | None = None,
+) -> TModel:
+    """Generate small/medium schema-conformant JSON with generateContent.
+
+    Long article HTML is intentionally generated as plain text by ``gemini_text``.
+    Keeping large HTML out of a JSON string prevents truncated/invalid JSON output.
+    """
+    attempt_count = max(1, attempts or MAX_STRUCTURED_ATTEMPTS)
+    last_error: Exception | None = None
+    retry_note = ""
+
+    for attempt in range(1, attempt_count + 1):
+        effective_prompt = prompt
+        if retry_note:
+            effective_prompt += f"""
+
+The previous response could not be used for this reason:
+{retry_note}
+Return exactly one complete JSON object matching the schema. Do not echo the prompt.
+"""
+        try:
+            response = gemini_client.models.generate_content(
+                model=model,
+                contents=effective_prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=schema,
+                    max_output_tokens=max_output_tokens,
+                    temperature=temperature,
+                    candidate_count=1,
+                ),
+            )
+            finish_reason = _response_finish_reason(response)
+            if finish_reason and "STOP" not in finish_reason.upper():
+                raise RuntimeError(f"모델 생성이 정상 종료되지 않았습니다: {finish_reason}")
+            parsed = getattr(response, "parsed", None)
+            if isinstance(parsed, schema):
+                result = parsed
+            elif parsed is not None:
+                result = schema.model_validate(parsed)
+            else:
+                result = schema.model_validate_json(_extract_response_text(response))
+            issues = validator(result) if validator else []
+            if issues:
+                raise ValueError("; ".join(issues[:8]))
+            return result
+        except Exception as exc:
+            last_error = exc
+            retry_note = _short_error(exc)
+            log(f"  ⚠️ 구조화 출력 재시도 {attempt}/{attempt_count}: {retry_note}")
+            if attempt < attempt_count:
+                time.sleep(min(2 * attempt, 6))
+
+    raise RuntimeError(
+        f"{schema.__name__} 구조화 출력을 {attempt_count}회 생성하지 못했습니다: "
+        f"{_short_error(last_error or RuntimeError('unknown error'))}"
+    )
+
+
+def _clean_model_html(raw: str) -> str:
+    value = (raw or "").strip()
+    value = re.sub(r"^```(?:html)?\s*", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s*```$", "", value)
+    return sanitize_html(value.strip())
+
+
+def gemini_text(
+    model: str,
+    prompt: str,
+    *,
+    max_output_tokens: int,
+    temperature: float = 0.7,
+    validator: Callable[[str], list[str]] | None = None,
+    attempts: int | None = None,
+) -> str:
+    """Generate long-form text/HTML without embedding it inside JSON."""
+    attempt_count = max(1, attempts or MAX_TEXT_ATTEMPTS)
+    last_error: Exception | None = None
+    retry_note = ""
+
+    for attempt in range(1, attempt_count + 1):
+        effective_prompt = prompt
+        if retry_note:
+            effective_prompt += f"""
+
+Previous output issue:
+{retry_note}
+Produce a fresh, complete article. Do not echo the prompt or research JSON.
+"""
+        try:
+            response = gemini_client.models.generate_content(
+                model=model,
+                contents=effective_prompt,
+                config=types.GenerateContentConfig(
+                    max_output_tokens=max_output_tokens,
+                    temperature=temperature,
+                    candidate_count=1,
+                ),
+            )
+            finish_reason = _response_finish_reason(response)
+            if finish_reason and any(token in finish_reason.upper() for token in ("MAX_TOKENS", "SAFETY", "RECITATION")):
+                raise RuntimeError(f"모델 생성이 정상 종료되지 않았습니다: {finish_reason}")
+            value = _extract_response_text(response)
+            issues = validator(value) if validator else []
+            if issues:
+                raise ValueError("; ".join(issues[:8]))
+            return value
+        except Exception as exc:
+            last_error = exc
+            retry_note = _short_error(exc)
+            log(f"  ⚠️ 장문 출력 재시도 {attempt}/{attempt_count}: {retry_note}")
+            if attempt < attempt_count:
+                time.sleep(min(2 * attempt, 6))
+
+    raise RuntimeError(
+        f"장문 출력을 {attempt_count}회 생성하지 못했습니다: "
+        f"{_short_error(last_error or RuntimeError('unknown error'))}"
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -729,8 +861,16 @@ def upsert_post(
     publish_mode: Literal["future", "draft"],
     scheduled_at: datetime | None = None,
     post_meta: dict[str, Any] | None = None,
+    existing_post_id: int | None = None,
 ) -> dict[str, Any]:
-    existing = find_post_by_slug(slug)
+    existing: dict[str, Any] | None = None
+    if existing_post_id:
+        try:
+            existing = wp_request("GET", f"posts/{existing_post_id}", params={"context": "edit"}).json()
+        except Exception as exc:
+            log(f"  ⚠️ 기존 WordPress 글 ID {existing_post_id} 조회 실패, 슬러그로 다시 찾습니다: {exc}")
+    if not existing:
+        existing = find_post_by_slug(slug)
     if existing and existing.get("status") == "publish":
         raise RuntimeError(f"같은 슬러그의 공개 글이 이미 존재합니다: {existing.get('link')}")
 
@@ -1209,7 +1349,13 @@ Google Search 기반 연구 메모
 9. 출처 목록으로 확인할 수 없는 내용은 limitations에 기록하고 사실처럼 쓰지 않는다.
 """
 
-    result = gemini_structured(RESEARCH_MODEL, prompt, ResearchPackage)
+    result = gemini_json(
+        RESEARCH_MODEL,
+        prompt,
+        ResearchPackage,
+        max_output_tokens=RESEARCH_MAX_OUTPUT_TOKENS,
+        temperature=0.1,
+    )
     assert isinstance(result, ResearchPackage)
     # Never trust the model to reproduce URLs. Keep the deterministic and
     # annotation-derived catalogue, while the model only selects source numbers.
@@ -1263,29 +1409,244 @@ def story_style_for(category: str, language: Literal["ko", "en"]) -> str:
     category_key = category.casefold()
     if "extreme survivors" in category_key or "극한의 생존자" in category:
         return (
-            "극한 환경의 한 장면에서 시작해 생물이 맞닥뜨리는 문제와 생존 해법을 따라가는 자연 다큐멘터리형"
+            "극한 환경의 실제 장면에서 출발해 생물이 해결해야 하는 문제와 생존 전략을 따라가는 자연 다큐멘터리형"
             if language == "ko"
-            else "a cinematic survival narrative that begins inside the animal's extreme habitat and follows the problems it must solve"
+            else "a cinematic survival narrative that opens inside the real habitat and follows the problems the organism must solve"
         )
     if "evolution mysteries" in category_key or "진화의 미스터리" in category:
         return (
-            "널리 알려진 주장이나 오해를 먼저 제시하고 증거를 하나씩 확인하는 과학 탐정형"
+            "널리 알려진 주장이나 오해를 먼저 던지고 출처가 뒷받침하는 증거를 하나씩 확인하는 과학 탐정형"
             if language == "ko"
-            else "a science-detective story that opens with a popular claim, then tests it against evidence step by step"
+            else "a science-detective feature that opens with a popular claim and tests it against source-backed evidence"
         )
     if "size lab" in category_key or "크기 비교" in category:
         return (
-            "숫자를 사람·자동차·건물·익숙한 동물과 비교해 실제 크기를 상상하게 만드는 실험형"
+            "검증된 수치를 익숙한 사물이나 동물과 비교해 실제 크기를 상상하게 만드는 실험형"
             if language == "ko"
-            else "a scale-comparison feature that turns measurements into vivid comparisons with people, vehicles, buildings, or familiar animals"
+            else "a scale-comparison feature that turns verified measurements into vivid comparisons with familiar objects or animals"
         )
     if "botany" in category_key or "식물학" in category:
         return (
-            "서식지의 풍경과 계절감에서 출발해 형태·번식·생존전략을 관찰하는 자연 에세이형"
+            "검증된 서식지 풍경에서 출발해 형태·번식·생존전략을 관찰하는 자연 에세이형"
             if language == "ko"
-            else "a field-note style botanical essay that begins with place and season, then reveals form, reproduction, and survival strategy"
+            else "a field-note botanical essay that begins with a verified habitat and reveals form, reproduction, and survival strategy"
         )
-    return "친근한 과학 교양 스토리텔링형" if language == "ko" else "an engaging popular-science narrative"
+    return "친근하고 리듬감 있는 과학 교양 스토리텔링형" if language == "ko" else "an engaging, rhythmic popular-science narrative"
+
+
+def compact_research_payload(research: ResearchPackage) -> str:
+    """Keep the writing prompt grounded while avoiding an unnecessarily huge payload."""
+    payload = {
+        "accepted_scientific_name": research.accepted_scientific_name,
+        "common_name_ko": research.common_name_ko,
+        "common_name_en": research.common_name_en,
+        "taxonomy": [item.model_dump() for item in research.taxonomy],
+        "overview": research.overview,
+        "distribution_and_habitat": research.distribution_and_habitat,
+        "conservation_status": research.conservation_status,
+        "verified_facts": [item.model_dump() for item in research.verified_facts],
+        "disputed_or_uncertain": [item.model_dump() for item in research.disputed_or_uncertain],
+        "common_misconceptions": [item.model_dump() for item in research.common_misconceptions],
+        "limitations": research.limitations,
+        "sources": [
+            {"number": index, "title": source.title, "publisher": source.publisher, "url": source.url}
+            for index, source in enumerate(research.sources, start=1)
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def article_body_generation_issues(raw_html: str, language: Literal["ko", "en"]) -> list[str]:
+    body = _clean_model_html(raw_html)
+    plain = strip_html(body)
+    issues: list[str] = []
+    if not plain:
+        issues.append("본문이 비어 있습니다.")
+        return issues
+    if body.count("[[IMAGE_1]]") != 1 or body.count("[[IMAGE_2]]") != 1:
+        issues.append("[[IMAGE_1]]과 [[IMAGE_2]]를 각각 정확히 한 번 포함해야 합니다.")
+    if len(re.findall(r"\[(\d{1,2})\]", body)) < MIN_CITATION_MARKERS:
+        issues.append(f"출처 번호가 최소 {MIN_CITATION_MARKERS}개 필요합니다.")
+    if language == "ko":
+        if len(plain) < MIN_KOREAN_CHARS:
+            issues.append(f"한국어 본문이 {len(plain)}자로 최소 {MIN_KOREAN_CHARS}자보다 짧습니다.")
+        if len(re.findall(r"[가-힣]", plain)) < 500:
+            issues.append("한국어 본문에 충분한 한국어 문장이 없습니다.")
+    else:
+        word_count = len(re.findall(r"[A-Za-z0-9']+", plain))
+        if word_count < MIN_ENGLISH_WORDS:
+            issues.append(f"영문 본문이 {word_count}단어로 최소 {MIN_ENGLISH_WORDS}단어보다 짧습니다.")
+        if re.search(r"[가-힣]", plain):
+            issues.append("영문 본문에 한국어 문자가 포함되어 있습니다.")
+    return issues
+
+
+def metadata_issues(metadata: ArticleMetadata) -> list[str]:
+    issues: list[str] = []
+    if not metadata.title.strip():
+        issues.append("제목이 비어 있습니다.")
+    if not slugify(metadata.slug or metadata.title):
+        issues.append("유효한 슬러그가 없습니다.")
+    if len(metadata.excerpt.strip()) < 40:
+        issues.append("요약문이 지나치게 짧습니다.")
+    if len(metadata.seo_description.strip()) < 50:
+        issues.append("SEO 설명이 지나치게 짧습니다.")
+    if len([tag for tag in metadata.tags if tag.strip()]) < 4:
+        issues.append("태그가 4개 미만입니다.")
+    return issues
+
+
+def article_body_prompt(
+    item: SheetItem,
+    research: ResearchPackage,
+    language: Literal["ko", "en"],
+    *,
+    revision_context: str = "",
+) -> str:
+    style = story_style_for(item.category, language)
+    research_json = compact_research_payload(research)
+    if language == "ko":
+        language_rules = f"""
+당신은 TaxonGuru 편집팀의 과학 스토리텔러다. 검증된 연구 패키지만 이용해 한국어 본문을 작성하라.
+
+서술 방향
+- {style}
+- 유명 과학 교양 블로그처럼 읽기 편하고 개성 있게 쓰되, 실제 작가의 문체를 모방하거나 전문가를 사칭하지 않는다.
+- 장면형 도입, 짧은 문단, 자연스러운 비유, 절제된 유머를 활용한다.
+
+절대 규칙
+1. 연구 패키지에 없는 해부학적 구조, 색상, 행동, 발견자 수식어, 역사적 일화, 수치 또는 인과관계를 만들지 않는다.
+2. '제왕적 학자', '전설적인 박사' 같은 근거 없는 직함·찬사는 금지한다. 인물은 자료에 확인되는 이름과 역할만 쓴다.
+3. 색깔이나 외형 묘사는 연구 패키지에 명시된 경우에만 쓴다. 자료에 없으면 분위기를 위해 임의로 보충하지 않는다.
+4. 사실을 풍부하게 보이게 하려고 연구자료 밖의 상식을 추가하지 않는다. 정보가 부족하면 범위를 좁혀 정확하게 쓴다.
+5. 모든 핵심 사실 뒤에 실제 출처 번호를 [1], [2] 형식으로 붙인다.
+6. 불확실하거나 논쟁적인 내용은 확인된 사실처럼 단정하지 않는다.
+7. 보고서식 '핵심 요약'으로 시작하지 말고 장면·질문·의외의 사실 중 하나로 시작한다.
+8. 주제에 맞는 자연스러운 소제목 4~7개를 사용하고, 문단은 보통 2~4문장으로 구성한다.
+9. 전문용어는 먼저 쉬운 말로 설명하고 필요할 때 괄호 안에 용어를 쓴다.
+10. [[IMAGE_1]]과 [[IMAGE_2]]를 서로 다른 적절한 위치에 각각 정확히 한 번 넣는다.
+11. 참고문헌·이미지 출처·자동검수·예약시간·AI 안내는 본문에 쓰지 않는다.
+12. WordPress 본문용 HTML만 출력한다. h1, script, style, iframe, form은 사용하지 않는다.
+13. 순수 본문 기준 약 3,000~4,800자. 반복으로 분량을 채우지 않는다.
+14. 마지막은 도입부의 장면이나 질문으로 돌아가 자연스럽게 마무리한다.
+"""
+    else:
+        language_rules = f"""
+You are TaxonGuru's science storyteller. Write an original English article using only the verified research package.
+
+Narrative direction
+- {style}
+- Sound like a polished, approachable popular-science blog: vivid, readable, lightly witty, and trustworthy.
+- Do not translate Korean phrasing line by line and do not imitate a real writer.
+
+Non-negotiable rules
+1. Do not invent anatomy, color, behavior, historical anecdotes, measurements, causal claims, or honorific descriptions that are absent from the research package.
+2. Never add flattering labels such as “legendary,” “imperial,” or “pioneering” to a person unless the supplied sources explicitly support that description.
+3. Describe color or appearance only when it appears in the verified package. Do not fill gaps for atmosphere.
+4. If the research is limited, narrow the story rather than supplementing it with unsupported general knowledge.
+5. Attach valid source markers such as [1] and [2] to every important factual claim.
+6. Clearly distinguish confirmed evidence from uncertainty or dispute.
+7. Open with a scene, question, or surprising source-backed fact—not a report-style summary.
+8. Use four to seven topic-specific headings and compact paragraphs, usually two to four sentences.
+9. Explain technical terms in plain English before using the formal term.
+10. Insert [[IMAGE_1]] and [[IMAGE_2]] exactly once each in two useful locations.
+11. Do not include references, image credits, automated review details, scheduling details, or AI disclosure in the body.
+12. Output clean WordPress body HTML only. Do not use h1, script, style, iframe, or form tags.
+13. Write 1,000–1,500 substantive words without padding or repetition.
+14. End by returning to the opening image or question.
+15. Write English only; do not include Korean text.
+"""
+
+    revision = f"\nRevision requirements from the previous review:\n{revision_context}\n" if revision_context else ""
+    return f"""
+{language_rules}
+
+Topic
+- Scientific name: {item.scientific_name}
+- Working title context: {item.display_title}
+- Central question or angle: {item.story_angle}
+- Category: {item.category}
+
+Verified research package
+{research_json}
+{revision}
+Return the article body only, beginning with the first HTML paragraph or heading.
+"""
+
+
+def generate_article_body(
+    item: SheetItem,
+    research: ResearchPackage,
+    language: Literal["ko", "en"],
+    *,
+    revision_context: str = "",
+) -> str:
+    raw = gemini_text(
+        WRITER_MODEL,
+        article_body_prompt(item, research, language, revision_context=revision_context),
+        max_output_tokens=ARTICLE_MAX_OUTPUT_TOKENS,
+        temperature=0.65,
+        validator=lambda value: article_body_generation_issues(value, language),
+    )
+    return _clean_model_html(raw)
+
+
+def generate_article_metadata(
+    item: SheetItem,
+    research: ResearchPackage,
+    body_html: str,
+    language: Literal["ko", "en"],
+) -> ArticleMetadata:
+    plain = strip_html(body_html)
+    if language == "ko":
+        instruction = "한국어 제목·요약·SEO 설명을 작성하고, 태그는 한국어와 유용한 영문 검색어를 섞는다."
+    else:
+        instruction = "Write natural English metadata for international search readers. Use English tags only."
+    prompt = f"""
+Create publication metadata for the article below.
+- {instruction}
+- The title must be engaging but factual and must not introduce a claim that is absent from the article.
+- slug must be concise lowercase ASCII words separated by hyphens.
+- excerpt should be approximately 90–180 characters for Korean or 20–35 words for English.
+- seo_description should be concise and factual.
+- Return 6–10 useful tags.
+
+Scientific name: {item.scientific_name}
+Common name context: {research.common_name_ko if language == 'ko' else research.common_name_en}
+Article language: {language}
+Article text:
+{plain[:10000]}
+"""
+    result = gemini_json(
+        WRITER_MODEL,
+        prompt,
+        ArticleMetadata,
+        max_output_tokens=METADATA_MAX_OUTPUT_TOKENS,
+        temperature=0.35,
+        validator=metadata_issues,
+    )
+    result.slug = slugify(result.slug or result.title)
+    result.tags = [tag.strip() for tag in result.tags if tag.strip()][:12]
+    return result
+
+
+def build_article_draft(
+    item: SheetItem,
+    research: ResearchPackage,
+    language: Literal["ko", "en"],
+    *,
+    revision_context: str = "",
+) -> ArticleDraft:
+    body = generate_article_body(item, research, language, revision_context=revision_context)
+    metadata = generate_article_metadata(item, research, body, language)
+    return ArticleDraft(
+        title=metadata.title,
+        slug=metadata.slug,
+        excerpt=metadata.excerpt,
+        html_body=body,
+        seo_description=metadata.seo_description,
+        tags=metadata.tags,
+    )
 
 
 def generate_article(
@@ -1293,91 +1654,7 @@ def generate_article(
     research: ResearchPackage,
     language: Literal["ko", "en"],
 ) -> ArticleDraft:
-    style = story_style_for(item.category, language)
-    if language == "ko":
-        prompt = f"""
-당신은 TaxonGuru 편집팀의 과학 스토리텔러다. 아래 검증 자료만 사용해 정확하면서도 끝까지 읽고 싶은 한국어 기사를 작성하라.
-
-이번 글의 서술 방식
-- {style}
-- 유명 과학 교양 블로그처럼 자연스럽고 개성 있게 쓰되 실제 인물의 문체를 모방하거나 전문가를 사칭하지 않는다.
-
-주제 정보
-- 학명: {item.scientific_name}
-- 제목 후보: {item.display_title}
-- 핵심 질문/관점: {item.story_angle}
-- 카테고리: {item.category}
-
-검증된 연구 패키지
-{research.model_dump_json(indent=2)}
-
-작성 규칙
-1. 한국어만 작성한다. 같은 페이지에 영어 번역을 넣지 않는다.
-2. 보고서나 백과사전처럼 시작하지 말고, 장면·질문·의외의 사실 중 하나로 시작한다.
-3. 첫 문장에서 모든 결론을 요약하지 않는다. 독자의 궁금증을 조금씩 풀어간다.
-4. 문단은 2~4문장으로 짧게 구성하고 짧은 문장과 긴 문장을 섞는다.
-5. 전문용어는 쉬운 설명을 먼저 제시한 뒤 괄호 안에 표기한다.
-6. 적절한 비유와 가벼운 재치를 사용하되 억지 농담, 유행어, 과도한 감탄사는 피한다.
-7. '대박', '충격', '소름', 근거 없는 '세계 최고' 표현은 사용하지 않는다.
-8. '핵심 요약' 같은 고정 구성을 매번 반복하지 않는다. 주제에 맞게 4~7개의 자연스러운 소제목을 만든다.
-9. 분류표가 필요하면 독자가 생물에 흥미를 느낀 뒤 배치한다.
-10. 주요 사실 뒤에는 연구 패키지의 출처 번호를 [1], [2] 형식으로 표시한다.
-11. 논쟁 중인 내용은 확정 사실처럼 쓰지 않고, 확인된 부분과 불확실한 부분을 구분한다.
-12. 직접 비교나 해석은 사실과 구분되도록 자연스럽게 표현한다.
-13. [[IMAGE_1]], [[IMAGE_2]]를 각각 정확히 한 번 넣는다.
-14. 참고문헌, 이미지 라이선스, 자동검수 점수, 예약시간, AI 사용 안내는 본문에 작성하지 않는다.
-15. 순수 본문 기준 3,000~4,800자 정도로 작성한다. 반복으로 분량을 채우지 않는다.
-16. 마지막은 도입부의 장면이나 질문으로 돌아가 여운 있게 끝낸다.
-17. title은 자연스럽고 구체적으로, slug는 짧은 영문 소문자 하이픈 형식으로 작성한다.
-18. tags는 한국어·영어 핵심 검색어를 합쳐 6~10개 제안한다.
-19. html_body는 script, style, iframe, form 없이 순수 본문 HTML만 반환한다.
-"""
-    else:
-        prompt = f"""
-You are the science storyteller for TaxonGuru. Write an original English feature using only the verified research package below.
-Do not translate the Korean title or imitate any real writer. Rebuild the story for curious international readers in natural, polished English.
-
-Narrative approach
-- {style}
-- Aim for the warmth and momentum of a strong popular-science blog: vivid, clear, lightly witty, and trustworthy.
-
-Topic
-- Scientific name: {item.scientific_name}
-- Korean working-title context: {item.display_title}
-- Central question/angle: {item.story_angle}
-- Category: {item.category}
-
-Verified research package
-{research.model_dump_json(indent=2)}
-
-Writing rules
-1. Write only in English. Do not include Korean text or a side-by-side translation.
-2. Open with a scene, question, or surprising fact—not a dictionary definition or summary list.
-3. Reveal the answer progressively instead of giving every conclusion in the first paragraph.
-4. Keep paragraphs compact, usually two to four sentences, and vary sentence rhythm.
-5. Explain technical terms in plain language before using the formal term.
-6. Use vivid comparisons and restrained humor, but avoid clickbait, memes, hype, or forced jokes.
-7. Do not use phrases such as "mind-blowing," "shocking," or unsupported superlatives.
-8. Do not repeat a fixed template. Create four to seven topic-specific section headings.
-9. Place taxonomy after the reader has become interested, not as the opening block.
-10. Attach source markers such as [1] and [2] to every important factual claim.
-11. Separate confirmed evidence from disputed or uncertain claims.
-12. Use both metric and familiar imperial equivalents when a measurement matters to international readers.
-13. Insert [[IMAGE_1]] and [[IMAGE_2]] exactly once each.
-14. Do not write the references, image license section, automated review score, scheduling details, or AI disclosure inside the article body.
-15. Target 1,000–1,500 substantive English words without padding or repetition.
-16. End by returning to the opening image or question.
-17. title should be natural and search-friendly; slug must be concise lowercase ASCII words separated by hyphens.
-18. tags should contain 6–10 useful English search terms.
-19. html_body must contain clean body HTML only, with no script, style, iframe, or form elements.
-"""
-
-    result = gemini_structured(WRITER_MODEL, prompt, ArticleDraft)
-    assert isinstance(result, ArticleDraft)
-    result.html_body = sanitize_html(result.html_body)
-    result.slug = slugify(result.slug or result.title)
-    result.tags = [tag.strip() for tag in result.tags if tag.strip()][:12]
-    return result
+    return build_article_draft(item, research, language)
 
 
 def review_article(
@@ -1391,30 +1668,34 @@ def review_article(
 아래 {language_name} 자연과학 블로그 초안을 엄격하게 검수하라. 점수는 0~100점이다.
 
 검수 기준
-- 연구 패키지에 없는 사실·수치·인과관계를 만들지 않았는가
+- 연구 패키지에 없는 사실·색상·해부학·수치·인과관계·인물 수식어를 만들지 않았는가
 - 모든 주요 사실에 올바른 출처 번호가 있는가
-- 분류학적 오류나 논쟁 중인 내용을 확정 사실로 표현한 문제가 없는가
-- 문체가 보고서처럼 딱딱하거나 고정 템플릿을 반복하지 않는가
-- 도입부가 장면·질문·반전으로 독자의 관심을 끄는가
-- 문단 리듬, 쉬운 설명, 절제된 유머가 자연스러운가
-- 클릭베이트, 가상 전문가 행세, 번역투가 없는가
-- 제목과 본문이 일치하고 독자에게 고유한 해설이 있는가
-- {language_name} 페이지에 다른 언어 문장이 불필요하게 섞이지 않았는가
+- 분류학 오류나 논쟁 중인 내용을 확정 사실처럼 표현하지 않았는가
+- 문체가 딱딱한 보고서가 아니라 읽기 좋은 과학 스토리텔링인가
+- 장면형 도입과 자연스러운 문단 리듬이 있는가
+- 클릭베이트, 가상 전문가 행세, 번역투, 과장된 찬사가 없는가
+- 비유는 비유임이 분명하며 새로운 과학 사실을 암시하지 않는가
+- 제목과 본문이 일치하고 다른 언어가 불필요하게 섞이지 않았는가
 
-통과 조건
-- 중대한 사실 오류 0건
-- 근거 없는 핵심 주장 0건
-- 점수 {MIN_QUALITY_SCORE}점 이상
+판정 원칙
+- 단순한 문학적 연결어는 사실 주장으로 오인하지 않는다.
+- 그러나 외형·색상·몸 구조·행동·발견 역사에 관한 구체적 묘사는 연구 패키지에 근거가 있어야 한다.
+- 통과하려면 중대한 사실 오류와 unsupported_claims가 모두 0건이어야 한다.
 
 연구 패키지
-{research.model_dump_json(indent=2)}
+{compact_research_payload(research)}
 
-초안
+검수 대상
 {article.model_dump_json(indent=2)}
 """
-    result = gemini_structured(REVIEW_MODEL, prompt, QualityReview)
-    assert isinstance(result, QualityReview)
-    result.score = max(0, min(100, result.score))
+    result = gemini_json(
+        REVIEW_MODEL,
+        prompt,
+        QualityReview,
+        max_output_tokens=REVIEW_MAX_OUTPUT_TOKENS,
+        temperature=0.05,
+    )
+    result.score = max(0, min(100, int(result.score)))
     return result
 
 
@@ -1426,44 +1707,21 @@ def revise_article(
     deterministic_issues: list[str],
     language: Literal["ko", "en"],
 ) -> ArticleDraft:
-    plain_text = strip_html(article.html_body)
-    current_measure = len(plain_text) if language == "ko" else len(re.findall(r"[A-Za-z0-9']+", plain_text))
-    target_text = (
-        f"현재 {current_measure}자, 최소 {MIN_KOREAN_CHARS}자, 목표 3,000~4,800자"
-        if language == "ko"
-        else f"currently {current_measure} words, minimum {MIN_ENGLISH_WORDS} words, target 1,000–1,500 words"
+    instructions = {
+        "critical_issues": review.critical_issues,
+        "unsupported_claims_to_remove": review.unsupported_claims,
+        "factual_corrections": review.factual_corrections,
+        "style_improvements": review.improvement_instructions,
+        "system_issues": deterministic_issues,
+        "previous_body": article.html_body,
+    }
+    revision_context = json.dumps(instructions, ensure_ascii=False, indent=2)
+    return build_article_draft(
+        item,
+        research,
+        language,
+        revision_context=revision_context,
     )
-    language_instruction = (
-        "한국어 단일 언어로, 장면형 도입과 자연스러운 과학 블로그 문체를 유지한다."
-        if language == "ko"
-        else "Write English only, rebuild awkward translated phrasing, and preserve a lively popular-science voice."
-    )
-    prompt = f"""
-아래 AI 검수와 시스템 검사 지적을 모두 반영해 기사를 다시 작성하라. 연구 패키지 밖의 사실은 추가하지 않는다.
-- 언어 규칙: {language_instruction}
-- 분량: {target_text}
-- 출처 번호와 [[IMAGE_1]], [[IMAGE_2]] 규칙을 유지한다.
-- 반복 문장으로 분량을 채우지 말고, 장면·비교·과학적 맥락·오해 검증을 구체화한다.
-- 자동검수 점수나 예약정보는 본문에 넣지 않는다.
-
-AI 검수 결과
-{review.model_dump_json(indent=2)}
-
-시스템 검사 결과
-{json.dumps(deterministic_issues, ensure_ascii=False)}
-
-연구 패키지
-{research.model_dump_json(indent=2)}
-
-기존 초안
-{article.model_dump_json(indent=2)}
-"""
-    result = gemini_structured(WRITER_MODEL, prompt, ArticleDraft)
-    assert isinstance(result, ArticleDraft)
-    result.html_body = sanitize_html(result.html_body)
-    result.slug = slugify(result.slug or result.title)
-    result.tags = [tag.strip() for tag in result.tags if tag.strip()][:12]
-    return result
 
 
 def build_references_html(sources: list[ResearchSource], language: Literal["ko", "en"]) -> str:
@@ -1539,16 +1797,26 @@ def license_is_usable(name: str) -> bool:
     )
 
 
-def search_commons_images(scientific_name: str, limit: int = 8) -> list[CommonsImage]:
+def _commons_is_historical_or_nonphoto(asset: CommonsImage) -> bool:
+    haystack = " ".join([asset.title, asset.description, asset.credit]).casefold()
+    keywords = [
+        "illustration", "drawing", "engraving", "etching", "lithograph", "plate",
+        "sketch", "diagram", "line art", "black and white", "monochrome", "woodcut",
+        "painting", "reconstruction", "restoration", "gravure", "figure from",
+    ]
+    return any(keyword in haystack for keyword in keywords)
+
+
+def search_commons_images(scientific_name: str, limit: int = 12) -> list[CommonsImage]:
     params = {
         "action": "query",
         "generator": "search",
         "gsrsearch": f'filetype:bitmap "{scientific_name}"',
         "gsrnamespace": 6,
-        "gsrlimit": 20,
+        "gsrlimit": 50,
         "prop": "imageinfo",
-        "iiprop": "url|extmetadata",
-        "iiurlwidth": 1600,
+        "iiprop": "url|extmetadata|size",
+        "iiurlwidth": 1800,
         "format": "json",
         "formatversion": 2,
     }
@@ -1566,6 +1834,10 @@ def search_commons_images(scientific_name: str, limit: int = 8) -> list[CommonsI
         if not info_list:
             continue
         info = info_list[0]
+        width = safe_int(info.get("width"))
+        height = safe_int(info.get("height"))
+        if width and height and max(width, height) < 700:
+            continue
         metadata = info.get("extmetadata", {})
         license_name = commons_metadata_value(metadata, "LicenseShortName") or commons_metadata_value(metadata, "UsageTerms")
         if not license_is_usable(license_name):
@@ -1586,9 +1858,10 @@ def search_commons_images(scientific_name: str, limit: int = 8) -> list[CommonsI
                 description=commons_metadata_value(metadata, "ImageDescription"),
             )
         )
-        if len(assets) >= limit:
-            break
-    return assets
+
+    # Modern photographs first; historical plates and drawings are retained only as a fallback.
+    assets.sort(key=lambda asset: (_commons_is_historical_or_nonphoto(asset), asset.title.casefold()))
+    return assets[:limit]
 
 
 def download_image(url: str) -> tuple[bytes, str, str]:
@@ -1642,37 +1915,193 @@ def upload_commons_image(asset: CommonsImage, item: SheetItem, index: int) -> Up
     )
 
 
-def generate_ai_image(item: SheetItem, research: ResearchPackage) -> UploadedMedia | None:
-    if not ALLOW_AI_FEATURED_IMAGE or not openai_client:
+def visual_research_brief(item: SheetItem, research: ResearchPackage) -> str:
+    facts = []
+    for fact in research.verified_facts[:8]:
+        facts.append(f"- {fact.claim}: {fact.explanation}")
+    taxonomy = " > ".join(part.name for part in research.taxonomy if part.name)
+    return "\n".join(
+        [
+            f"Scientific name: {research.accepted_scientific_name or item.scientific_name}",
+            f"English common name: {research.common_name_en}",
+            f"Korean common name: {research.common_name_ko}",
+            f"Taxonomy: {taxonomy}",
+            f"Habitat and distribution: {research.distribution_and_habitat}",
+            f"Overview: {research.overview}",
+            "Verified visible or ecological facts:",
+            *facts,
+        ]
+    )[:9000]
+
+
+def generate_ai_image(
+    item: SheetItem,
+    research: ResearchPackage,
+    *,
+    role: Literal["featured", "habitat", "detail"],
+    index: int,
+) -> UploadedMedia | None:
+    if not openai_client:
         return None
-    prompt = (
-        f"Museum-quality scientific editorial illustration of {research.accepted_scientific_name or item.scientific_name} "
-        f"in a plausible natural habitat. Accurately reflect the visible anatomy described in reliable zoological or botanical sources. "
-        "Landscape composition, no text, no logo, no watermark. This is an explanatory illustration, not documentary photography."
-    )
+    if role == "featured" and not ALLOW_AI_FEATURED_IMAGE:
+        return None
+    if role != "featured" and not GENERATE_AI_BODY_IMAGES:
+        return None
+
+    role_instruction = {
+        "featured": (
+            "Create a visually compelling landscape hero image for a science magazine article. "
+            "The organism should be the clear focal point, with rich natural color, cinematic light, strong depth, "
+            "and an inviting composition suitable for social sharing and search thumbnails. Do not make it monochrome."
+        ),
+        "habitat": (
+            "Create a wide explanatory habitat scene showing the organism in its scientifically plausible environment. "
+            "Use natural color and clear spatial context. The subject must remain recognizable and not be tiny in the frame."
+        ),
+        "detail": (
+            "Create a close editorial view that explains one verified anatomical or behavioral feature without labels or text. "
+            "Use natural color, crisp detail, and a composition distinct from the habitat image."
+        ),
+    }[role]
+    prompt = f"""
+{role_instruction}
+
+Scientific grounding:
+{visual_research_brief(item, research)}
+
+Accuracy rules:
+- Depict only anatomy, behavior, habitat, and color that are supported by the grounding above.
+- If an exact organism color is not verified, use a cautious naturalistic neutral coloration while making the environment visually rich.
+- Do not add fantasy features, extra limbs, human objects, captions, labels, logos, borders, or watermarks.
+- This is an AI-generated explanatory editorial illustration, not documentary evidence.
+- Landscape 3:2 composition, realistic textures, no text.
+"""
     response = openai_client.images.generate(
         model=OPENAI_IMAGE_MODEL,
         prompt=prompt,
         size="1536x1024",
-        quality="medium",
+        quality=AI_IMAGE_QUALITY,
         n=1,
     )
     image_data = response.data[0]
-    if not getattr(image_data, "b64_json", None):
+    image_bytes: bytes | None = None
+    if getattr(image_data, "b64_json", None):
+        image_bytes = base64.b64decode(image_data.b64_json)
+    elif getattr(image_data, "url", None):
+        downloaded = session.get(image_data.url, timeout=REQUEST_TIMEOUT)
+        downloaded.raise_for_status()
+        image_bytes = downloaded.content
+    if not image_bytes:
         return None
-    image_bytes = base64.b64decode(image_data.b64_json)
+
     today = datetime.now(SCHEDULE_TZ).strftime("%Y-%m-%d")
-    caption_ko = f"TaxonGuru 제작 · AI 생성 설명용 이미지 · 실제 관찰 사진 아님 · 생성일 {today}"
-    caption_en = f"Created by TaxonGuru · AI-generated explanatory image · not a documentary photograph · generated {today}"
+    role_ko = {"featured": "대표", "habitat": "서식 환경", "detail": "형태·행동"}[role]
+    role_en = {"featured": "featured", "habitat": "habitat", "detail": "anatomy/behavior"}[role]
+    caption_ko = f"TaxonGuru 제작 · AI 기반 {role_ko} 설명용 재현 이미지 · 실제 관찰 사진 아님 · 생성일 {today}"
+    caption_en = f"Created by TaxonGuru · AI-generated {role_en} explanatory reconstruction · not a documentary photograph · generated {today}"
+    safe_slug = item.slug or slugify(item.scientific_name) or "taxon"
     return upload_media_bytes(
         image_bytes=image_bytes,
-        filename=f"{item.slug or slugify(item.scientific_name)}-ai-cover.png",
+        filename=f"{safe_slug}-ai-{role}-{index}.png",
         mime_type="image/png",
-        alt_text=f"Scientific illustration of {item.scientific_name}",
+        alt_text=f"AI explanatory illustration of {item.scientific_name} ({role})",
         caption_ko=caption_ko,
         caption_en=caption_en,
-        description_html=f"AI-generated explanatory image, not a documentary photograph. Model: {html.escape(OPENAI_IMAGE_MODEL)}",
+        description_html=(
+            "AI-generated explanatory editorial illustration; not documentary evidence. "
+            f"Role: {html.escape(role)}. Model: {html.escape(OPENAI_IMAGE_MODEL)}"
+        ),
     )
+
+
+def prepare_article_media(item: SheetItem, research: ResearchPackage) -> list[UploadedMedia]:
+    """Return media in fixed order: featured image, body image 1, body image 2..."""
+    uploaded: list[UploadedMedia] = []
+    commons_assets: list[CommonsImage] = []
+    try:
+        commons_assets = search_commons_images(item.scientific_name, limit=max(12, MIN_BODY_IMAGES * 4))
+        photo_count = sum(not _commons_is_historical_or_nonphoto(asset) for asset in commons_assets)
+        log(f"  🖼️ Commons 후보 {len(commons_assets)}개 · 사진형 후보 {photo_count}개")
+    except Exception as exc:
+        log(f"  ⚠️ Commons 검색 실패: {exc}")
+
+    used_pages: set[str] = set()
+
+    # A colorful AI hero is preferred so old monochrome plates do not become the thumbnail.
+    if PREFER_AI_FEATURED_IMAGE:
+        try:
+            featured = generate_ai_image(item, research, role="featured", index=1)
+            if featured:
+                uploaded.append(featured)
+                log("  ✅ AI 대표 이미지 생성 완료")
+        except Exception as exc:
+            log(f"  ⚠️ AI 대표 이미지 생성 실패, Commons로 대체합니다: {exc}")
+
+    if not uploaded:
+        for asset in commons_assets:
+            if _commons_is_historical_or_nonphoto(asset) and not ALLOW_HISTORICAL_BODY_IMAGES:
+                continue
+            try:
+                uploaded.append(upload_commons_image(asset, item, 1))
+                used_pages.add(asset.page_url)
+                log("  ✅ Commons 대표 이미지 지정")
+                break
+            except Exception as exc:
+                log(f"  ⚠️ Commons 대표 이미지 업로드 실패: {exc}")
+
+    # Body images: use modern/photo-like Commons assets first.
+    body_media: list[UploadedMedia] = []
+    commons_index = 2
+    for asset in commons_assets:
+        if len(body_media) >= MIN_BODY_IMAGES:
+            break
+        if asset.page_url in used_pages:
+            continue
+        if _commons_is_historical_or_nonphoto(asset) and not ALLOW_HISTORICAL_BODY_IMAGES:
+            continue
+        try:
+            body_media.append(upload_commons_image(asset, item, commons_index))
+            used_pages.add(asset.page_url)
+            commons_index += 1
+        except Exception as exc:
+            log(f"  ⚠️ Commons 본문 이미지 업로드 실패: {exc}")
+
+    # Fill every missing body slot with a distinct AI explanatory image.
+    roles: list[Literal["habitat", "detail"]] = ["habitat", "detail"]
+    while len(body_media) < MIN_BODY_IMAGES and GENERATE_AI_BODY_IMAGES:
+        role = roles[len(body_media) % len(roles)]
+        try:
+            generated = generate_ai_image(item, research, role=role, index=len(body_media) + 1)
+            if not generated:
+                break
+            body_media.append(generated)
+            log(f"  ✅ AI 본문 이미지 생성 완료: {role}")
+        except Exception as exc:
+            log(f"  ⚠️ AI 본문 이미지 생성 실패({role}): {exc}")
+            break
+
+    # Last-resort fallback: an older plate is still better than an empty English article.
+    if len(body_media) < MIN_BODY_IMAGES:
+        for asset in commons_assets:
+            if len(body_media) >= MIN_BODY_IMAGES:
+                break
+            if asset.page_url in used_pages:
+                continue
+            try:
+                body_media.append(upload_commons_image(asset, item, commons_index))
+                used_pages.add(asset.page_url)
+                commons_index += 1
+                log("  ℹ️ 본문 이미지 부족으로 Commons 역사자료를 보조 이미지로 사용합니다.")
+            except Exception as exc:
+                log(f"  ⚠️ Commons 보조 이미지 업로드 실패: {exc}")
+
+    # If no featured image exists after all preferred paths, reuse the first body asset.
+    if not uploaded and body_media:
+        uploaded.append(body_media.pop(0))
+
+    uploaded.extend(body_media)
+    log(f"  🖼️ 최종 이미지 구성: 대표 {1 if uploaded else 0}개 + 본문 {max(0, len(uploaded) - 1)}개")
+    return uploaded
 
 
 def figure_html(media: UploadedMedia, alt_text: str, language: Literal["ko", "en"]) -> str:
@@ -1763,35 +2192,35 @@ def process_language_article(
     research: ResearchPackage,
     language: Literal["ko", "en"],
 ) -> tuple[ArticleDraft, QualityReview, list[str], bool, str]:
-    article = generate_article(item, research, language)
-    review = review_article(item, research, article, language)
-    deterministic_issues = deterministic_quality_issues(article, research, language)
     label = "한국어" if language == "ko" else "영어"
-    log(f"  🧪 {label} 1차 자동 검수: {review.score}점")
+    article = generate_article(item, research, language)
+    review = QualityReview()
+    deterministic_issues: list[str] = []
 
-    passed = (
-        review.pass_review
-        and review.score >= MIN_QUALITY_SCORE
-        and not review.critical_issues
-        and not review.unsupported_claims
-        and not deterministic_issues
-    )
-    if not passed:
-        log(f"  🔁 {label} 검수 지적을 반영해 한 번 재작성합니다.")
-        article = revise_article(item, research, article, review, deterministic_issues, language)
-        review = review_article(item, research, article, language)
+    for round_index in range(MAX_REWRITE_ROUNDS + 1):
         deterministic_issues = deterministic_quality_issues(article, research, language)
-        log(f"  🧪 {label} 2차 자동 검수: {review.score}점")
+        review = review_article(item, research, article, language)
+        log(f"  🧪 {label} {round_index + 1}차 자동 검수: {review.score}점")
 
-    passed = (
-        review.pass_review
-        and review.score >= MIN_QUALITY_SCORE
-        and not review.critical_issues
-        and not review.unsupported_claims
-        and not deterministic_issues
-    )
+        passed = (
+            review.pass_review
+            and review.score >= MIN_QUALITY_SCORE
+            and not review.critical_issues
+            and not review.unsupported_claims
+            and not deterministic_issues
+        )
+        if passed:
+            summary = summarize_review(review, deterministic_issues)
+            return article, review, deterministic_issues, True, summary
+
+        if round_index >= MAX_REWRITE_ROUNDS:
+            break
+
+        log(f"  🔁 {label} 검수 지적을 반영해 {round_index + 1}차 재작성합니다.")
+        article = revise_article(item, research, article, review, deterministic_issues, language)
+
     summary = summarize_review(review, deterministic_issues)
-    return article, review, deterministic_issues, passed, summary
+    return article, review, deterministic_issues, False, summary
 
 
 def compose_public_content(
@@ -1803,9 +2232,9 @@ def compose_public_content(
     review: QualityReview,
     review_summary: str,
 ) -> str:
-    body_media = uploaded[1:3] if len(uploaded) > 1 else []
+    body_media = uploaded[1 : 1 + MIN_BODY_IMAGES] if len(uploaded) > 1 else []
     body = article.html_body
-    for idx in range(2):
+    for idx in range(MIN_BODY_IMAGES):
         placeholder = f"[[IMAGE_{idx + 1}]]"
         if idx < len(body_media):
             alt = (
@@ -1902,9 +2331,15 @@ def create_or_schedule_post(
     en_review: QualityReview | None = None
     en_passed = False
     en_summary = "영문 발행 비활성화"
+    en_generation_error = ""
     if ENABLE_ENGLISH:
         update_sheet_fields(worksheet, headers, item.row_number, {"status": "영어작성"})
-        en_article, en_review, _, en_passed, en_summary = process_language_article(item, research, "en")
+        try:
+            en_article, en_review, _, en_passed, en_summary = process_language_article(item, research, "en")
+        except Exception as exc:
+            en_generation_error = f"영문 작성 실패: {_short_error(exc)}"
+            en_summary = en_generation_error
+            log(f"  ⚠️ {en_generation_error}")
 
     if not ko_passed and not DRAFT_ON_REVIEW_FAILURE:
         update_sheet_fields(
@@ -1924,22 +2359,8 @@ def create_or_schedule_post(
         log(f"  ⛔ 한국어 품질 기준 미달로 WordPress에 저장하지 않았습니다: {ko_summary}")
         return
 
-    # Wikimedia Commons images are shared by both language versions; captions are localized per page.
-    uploaded: list[UploadedMedia] = []
-    try:
-        commons_assets = search_commons_images(item.scientific_name)
-        for idx, asset in enumerate(commons_assets[:3], start=1):
-            try:
-                uploaded.append(upload_commons_image(asset, item, idx))
-            except Exception as image_error:
-                log(f"  ⚠️ Commons 이미지 {idx} 업로드 실패: {image_error}")
-    except Exception as commons_error:
-        log(f"  ⚠️ Commons 검색 실패: {commons_error}")
-
-    if not uploaded:
-        ai_media = generate_ai_image(item, research)
-        if ai_media:
-            uploaded.append(ai_media)
+    # Media order is fixed: a colorful featured image first, followed by body images.
+    uploaded = prepare_article_media(item, research)
     featured_media = uploaded[0].media_id if uploaded else None
 
     ko_scheduled: datetime | None = None
@@ -1984,6 +2405,7 @@ def create_or_schedule_post(
         publish_mode=ko_publish_mode,
         scheduled_at=ko_scheduled,
         post_meta={"_taxonguru_language": "ko", "_taxonguru_translation_id": item.en_post_id or 0},
+        existing_post_id=item.post_id,
     )
     ko_post_id = int(ko_post["id"])
     ko_status = str(ko_post.get("status", DRAFT_STATUS))
@@ -2018,6 +2440,7 @@ def create_or_schedule_post(
             publish_mode=en_publish_mode,
             scheduled_at=en_scheduled,
             post_meta={"_taxonguru_language": "en", "_taxonguru_translation_id": ko_post_id},
+            existing_post_id=item.en_post_id,
         )
         en_post_id = int(en_post["id"])
         en_edit_url = f"{WP_SITE_URL}/wp-admin/post.php?post={en_post_id}&action=edit"
@@ -2032,7 +2455,7 @@ def create_or_schedule_post(
 
     if ko_status == "future" and (not ENABLE_ENGLISH or en_status == "future"):
         next_state = "한영예약완료" if ENABLE_ENGLISH else "예약완료"
-    elif ko_status == "future" and en_status == DRAFT_STATUS:
+    elif ko_status == "future" and ENABLE_ENGLISH and (en_status == DRAFT_STATUS or en_article is None):
         next_state = "한국어예약/영문검수필요"
     else:
         next_state = "검수필요"
@@ -2065,7 +2488,7 @@ def create_or_schedule_post(
             "en_scheduled_date": en_scheduled_text,
             "en_auto_review_result": en_summary,
             "translation_linked": "완료" if linked else ("비활성" if not ENABLE_ENGLISH else "실패"),
-            "en_error": "" if en_passed or not ENABLE_ENGLISH else en_summary[:500],
+            "en_error": "" if en_passed or not ENABLE_ENGLISH else (en_generation_error or en_summary)[:500],
         },
     )
 
@@ -2103,7 +2526,8 @@ def main() -> int:
     log(
         f"자동 예약: {'ON' if AUTO_SCHEDULE else 'OFF'} · 기준 {MIN_QUALITY_SCORE}점/출처 {MIN_SOURCE_COUNT}개 · "
         f"KO {PUBLISH_HOUR:02d}:{PUBLISH_MINUTE:02d} / EN {ENGLISH_PUBLISH_HOUR:02d}:{ENGLISH_PUBLISH_MINUTE:02d} "
-        f"{SCHEDULE_TIMEZONE} · 영어 {'ON' if ENABLE_ENGLISH else 'OFF'}"
+        f"{SCHEDULE_TIMEZONE} · 영어 {'ON' if ENABLE_ENGLISH else 'OFF'} · "
+        f"AI 대표 {'ON' if ALLOW_AI_FEATURED_IMAGE else 'OFF'} / AI 본문 {'ON' if GENERATE_AI_BODY_IMAGES else 'OFF'}"
     )
     log("=" * 70)
 
