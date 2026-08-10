@@ -15,7 +15,7 @@ import requests
 import urllib3.util.connection as urllib3_connection
 
 # =============================================================================
-# TaxonGuru Master Controller v4
+# TaxonGuru Master Controller v5
 #
 # Priority
 # 1) Sync already scheduled posts.
@@ -164,6 +164,111 @@ def batch_update_statuses(
     return migrated
 
 
+def _row_value(row: list[str], index: int | None) -> str:
+    if index is None or index >= len(row):
+        return ""
+    return str(row[index]).strip()
+
+
+def _wp_post_status(post_id: int) -> str:
+    try:
+        response = requests.get(
+            f"{WP_SITE_URL}/wp-json/wp/v2/posts/{post_id}",
+            params={"context": "edit", "_fields": "id,status,link"},
+            auth=(WP_USER, WP_APP_PASSWORD),
+            timeout=REQUEST_TIMEOUT,
+            headers={"User-Agent": "TaxonGuruMasterController/5.0"},
+        )
+        if response.status_code == 200:
+            return str(response.json().get("status", "")).strip()
+        if response.status_code == 404:
+            return "missing"
+        return f"http_{response.status_code}"
+    except Exception as exc:
+        return f"error:{' '.join(str(exc).split())[:180]}"
+
+
+def recover_known_cleanup_errors(
+    topic_ws: gspread.Worksheet,
+    headers: list[str],
+    rows: list[list[str]],
+) -> dict[str, int]:
+    """Recover the v4 cleanup_note header-mapping bug without user edits.
+
+    v4 successfully moved many WordPress posts to draft, but then failed while
+    writing the Google-Sheets field ``cleanup_note`` because that logical alias
+    was missing in audit_existing_posts.py. Those rows were left as
+    ``기존정리오류`` even though they are safe to retry.
+
+    Already repaired/published bilingual rows are preserved rather than rewritten.
+    """
+    status_idx = find_header(headers, ["상태"])
+    sci_idx = find_header(headers, ["학명", "학명(Scientific Name)", "학명 (Scientific Name)"])
+    post_idx = find_header(headers, ["WP_POST_ID", "WP POST ID"])
+    en_post_idx = find_header(headers, ["EN_POST_ID", "영문 WP_POST_ID"])
+    note_idx = find_header(headers, ["정리메모", "정리 메모"])
+    error_idx = find_header(headers, ["오류", "에러"])
+    attempt_idx = find_header(headers, ["재작성시도", "재작성 시도"])
+
+    result = {"requeued": 0, "published": 0, "scheduled": 0, "held": 0}
+    if status_idx is None:
+        return result
+
+    cells: list[gspread.Cell] = []
+    for row_number, row in enumerate(rows, start=2):
+        status = _row_value(row, status_idx)
+        if status != "기존정리오류":
+            continue
+        error_text = _row_value(row, error_idx)
+        # Only auto-recover the known v4 bug. Other cleanup errors stay visible.
+        if "cleanup_note" not in error_text:
+            continue
+
+        scientific_name = _row_value(row, sci_idx)
+        post_id = safe_int(_row_value(row, post_idx))
+        en_post_id = safe_int(_row_value(row, en_post_idx))
+        note = _row_value(row, note_idx)
+
+        next_status = "기존비공개보류"
+        next_note = "v5 자동복구: cleanup_note 오류였으나 재작성에 필요한 학명 또는 게시물 ID가 없습니다."
+
+        # One row may have been fully rewritten before the sheet write failed.
+        # Preserve it if WordPress says the repaired posts are already live/future.
+        if scientific_name and post_id:
+            ko_status = _wp_post_status(post_id)
+            en_status = _wp_post_status(en_post_id) if en_post_id else ""
+            if en_post_id and ko_status == "publish" and en_status == "publish":
+                next_status = "기존한영수정완료"
+                next_note = "v5 자동복구: 기존 재작성 글의 한·영 공개 상태를 확인하여 완료 처리했습니다."
+                result["published"] += 1
+            elif en_post_id and ko_status == "future" and en_status == "future":
+                next_status = "기존한영재예약완료"
+                next_note = "v5 자동복구: 기존 재작성 글의 한·영 예약 상태를 확인했습니다."
+                result["scheduled"] += 1
+            elif en_post_id and ko_status == "publish" and en_status == "future":
+                next_status = "기존한국어공개/영문재예약"
+                next_note = "v5 자동복구: 한국어 공개·영문 예약 상태를 확인했습니다."
+                result["scheduled"] += 1
+            else:
+                next_status = "기존재작성대기"
+                next_note = f"v5 자동복구: cleanup_note 헤더 매핑 오류 복구. WordPress KO={ko_status}, EN={en_status or '-'}"
+                result["requeued"] += 1
+        else:
+            result["held"] += 1
+
+        cells.append(gspread.Cell(row_number, status_idx + 1, next_status))
+        if note_idx is not None:
+            cells.append(gspread.Cell(row_number, note_idx + 1, next_note))
+        if error_idx is not None:
+            cells.append(gspread.Cell(row_number, error_idx + 1, ""))
+        if attempt_idx is not None and next_status == "기존재작성대기" and not _row_value(row, attempt_idx):
+            cells.append(gspread.Cell(row_number, attempt_idx + 1, "0"))
+
+    if cells:
+        topic_ws.update_cells(cells, value_input_option="USER_ENTERED")
+    return result
+
+
 def update_control(control_ws: gspread.Worksheet, **data: Any) -> None:
     now = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S %Z")
     rows = [["항목", "값"], ["최근실행", now]]
@@ -182,7 +287,7 @@ def preflight_wordpress() -> tuple[bool, str]:
                 params={"per_page": 1, "context": "edit", "_fields": "id,status,modified"},
                 auth=(WP_USER, WP_APP_PASSWORD),
                 timeout=REQUEST_TIMEOUT,
-                headers={"User-Agent": "TaxonGuruMasterController/4.0"},
+                headers={"User-Agent": "TaxonGuruMasterController/5.0"},
             )
             if response.status_code == 200:
                 return True, "WordPress REST 연결 정상"
@@ -222,6 +327,7 @@ def summary_values(counts: Counter[str]) -> dict[str, Any]:
         "기존재작성대기": count_any(counts, LEGACY_REWRITE_STATES),
         "기존재예약대기": count_any(counts, LEGACY_SCHEDULED_STATES),
         "기존비공개보류": counts.get("기존비공개보류", 0),
+        "기존정리오류": counts.get("기존정리오류", 0),
         "한영예약완료보존": counts.get("한영예약완료", 0),
         "대기주제": counts.get("대기", 0),
         "영문재검수": count_any(counts, ENGLISH_REPAIR_STATES),
@@ -281,7 +387,7 @@ def process_one_legacy_rewrite(topic_ws: gspread.Worksheet, control_ws: gspread.
 
 def main() -> int:
     log("=" * 76)
-    log("TaxonGuru Master v4: 기존 감사 → 비공개 재작성 → 다음 빈 순번 예약 → 신규 자동운영")
+    log("TaxonGuru Master v5: 오류 자동복구 → 기존 감사 → 비공개 재작성 → 다음 빈 순번 예약 → 신규 자동운영")
     log(
         f"기존 감사 대상='{LEGACY_TARGET_STATUS}' 정확히 일치 · 감사 회당 {LEGACY_BATCH_SIZE}건 · "
         f"재작성 최대 {os.getenv('MAX_LEGACY_REWRITE_ATTEMPTS', '3')}회"
@@ -307,6 +413,17 @@ def main() -> int:
         )
         log(f"⚠️ {wp_message}")
         return 0
+
+    # Self-heal rows stranded by the v4 cleanup_note sheet-mapping bug.
+    recovery = recover_known_cleanup_errors(topic_ws, headers, rows)
+    recovered_total = sum(recovery.values())
+    if recovered_total:
+        log(
+            "🛠️ 기존정리오류 자동복구: "
+            f"재작성대기 {recovery['requeued']} / 이미공개완료 {recovery['published']} / "
+            f"예약복구 {recovery['scheduled']} / 보류 {recovery['held']}"
+        )
+        headers, rows, counts = read_sheet(topic_ws)
 
     # Always synchronize future→publish before deciding the next phase.
     if sync_reservations(topic_ws, control_ws) != 0:
