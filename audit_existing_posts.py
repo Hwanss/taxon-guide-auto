@@ -125,6 +125,8 @@ TOPIC_ALIASES: dict[str, list[str]] = {
     "source_count": ["자료수"],
     "error": ["오류"],
     "en_error": ["영문오류"],
+    "rewrite_attempts": ["재작성시도", "재작성 시도"],
+    "cleanup_note": ["정리메모", "정리 메모"],
 }
 
 FIXED_TEMPLATE_RE = re.compile(
@@ -252,7 +254,10 @@ def normalize_header(value: str) -> str:
 
 def header_index(headers: list[str], key: str) -> int | None:
     normalized = [normalize_header(item) for item in headers]
-    for alias in TOPIC_ALIASES[key]:
+    # Unknown logical fields should never crash a cleanup run.
+    # Fall back to the logical key itself so a newly added sheet column can still match.
+    aliases = TOPIC_ALIASES.get(key, [key])
+    for alias in aliases:
         target = normalize_header(alias)
         if target in normalized:
             return normalized.index(target)
