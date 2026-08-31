@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from html import unescape
 from pathlib import Path
 from typing import Any, Literal, TypeVar
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import gspread
 import requests
@@ -65,6 +65,7 @@ AUTO_CLEANUP_MODE = os.getenv("AUTO_CLEANUP_MODE", "false").lower() == "true"
 AUTO_FAIL_CLOSED_DRAFT = os.getenv("AUTO_FAIL_CLOSED_DRAFT", "true").lower() == "true"
 AUTO_TRASH_GRADE_D = os.getenv("AUTO_TRASH_GRADE_D", "false").lower() == "true"
 QUEUE_GRADE_D_FOR_REWRITE = os.getenv("QUEUE_GRADE_D_FOR_REWRITE", "true").lower() == "true"
+ADSENSE_RECOVERY_MODE = os.getenv("ADSENSE_RECOVERY_MODE", "false").lower() == "true"
 
 if FORCE_IPV4:
     # GitHub-hosted runners can occasionally resolve a site to IPv6 even when the route is unavailable.
@@ -528,14 +529,22 @@ def append_audit_row(audit_ws: gspread.Worksheet, data: dict[str, Any]) -> None:
 def structural_audit(post: dict[str, Any]) -> StructuralResult:
     content = str(post.get("content", {}).get("raw") or post.get("content", {}).get("rendered") or "")
     text = text_only(content)
-    external = {
+    all_external_links = {
         link
         for link in re.findall(r'href=["\'](https?://[^"\']+)', content, flags=re.I)
         if "taxonguru.com" not in link
     }
+    intermediary_links = sorted(link for link in all_external_links if is_source_intermediary_url(link))
+    external = {link for link in all_external_links if not is_source_intermediary_url(link)}
+    post_link = str(post.get("link", ""))
+    is_english_page = "/en/" in (urlsplit(post_link).path or "")
+    has_han_or_kana = bool(re.search(r"[\u3400-\u4DBF\u4E00-\u9FFF\u3040-\u30FF]", text))
+    has_hangul = bool(re.search(r"[가-힣]", text))
+    old_policy_link = "/ai-policy/" in content
+    missing_editorial_policy_link = "/ai-use-policy/" not in content
     images = len(re.findall(r"<img\b", content, flags=re.I))
     license_mentions = len(
-        re.findall(r"CC\s*BY|CC0|Public domain|퍼블릭\s*도메인|Wikimedia Commons|원본\s*파일", content, re.I)
+        re.findall(r"CC\s*BY|CC0|Public domain|퍼블릭\s*도메인|Wikimedia Commons|원본\s*파일|AI[- ]generated|AI\s*생성|Created by TaxonGuru", content, re.I)
     )
     fixed_template = bool(FIXED_TEMPLATE_RE.search(text))
     bilingual = bool(BILINGUAL_RE.search(content))
@@ -568,6 +577,21 @@ def structural_audit(post: dict[str, Any]) -> StructuralResult:
     if AUTO_REVIEW_TEXT_RE.search(text):
         score -= 6
         issues.append("공개용 본문에 자동검수 안내 노출")
+    if intermediary_links:
+        score -= 22
+        issues.append(f"Google/Vertex 중계 출처 링크 노출 {len(intermediary_links)}건")
+    if old_policy_link:
+        score -= 8
+        issues.append("구형 AI 정책 링크(/ai-policy/) 사용")
+    if missing_editorial_policy_link:
+        score -= 5
+        issues.append("AI/편집 정책 링크 없음")
+    if not is_english_page and has_han_or_kana:
+        score -= 15
+        issues.append("한국어 본문에 중국어 한자/일본어 가나 혼입")
+    if is_english_page and (has_hangul or has_han_or_kana):
+        score -= 15
+        issues.append("영문 본문에 한국어/CJK 문자 혼입")
 
     return StructuralResult(
         score=max(0, score),
@@ -590,11 +614,52 @@ def _obj_value(obj: Any, key: str, default: Any = None) -> Any:
 
 
 def normalize_url(value: str) -> str:
-    value = value.strip()
+    value = (value or "").strip()
     if not value.startswith(("http://", "https://")):
         return ""
-    parts = urlsplit(value)
-    return f"{parts.scheme}://{parts.netloc}{parts.path}".rstrip("/")
+    try:
+        parts = urlsplit(value)
+        if not parts.netloc or parts.hostname in {"localhost", "127.0.0.1"}:
+            return ""
+        tracking_keys = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "gclid", "fbclid"}
+        query = urlencode(
+            [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k.casefold() not in tracking_keys]
+        )
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, query, ""))
+    except ValueError:
+        return ""
+
+
+def is_source_intermediary_url(value: str) -> bool:
+    try:
+        parts = urlsplit(value)
+        host = (parts.hostname or "").casefold()
+    except ValueError:
+        return True
+    if host == "vertexaisearch.cloud.google.com":
+        return True
+    if host in {"google.com", "www.google.com"} and parts.path.startswith(("/url", "/search")):
+        return True
+    return host in {"googleusercontent.com", "www.googleusercontent.com"}
+
+
+def resolve_source_url(value: str) -> str:
+    normalized = normalize_url(value)
+    if not normalized:
+        return ""
+    if not is_source_intermediary_url(normalized):
+        return normalized
+    try:
+        response = session.get(
+            normalized, allow_redirects=True, timeout=min(15, REQUEST_TIMEOUT), stream=True
+        )
+        final_url = normalize_url(str(response.url or ""))
+        response.close()
+        if final_url and not is_source_intermediary_url(final_url):
+            return final_url
+    except requests.RequestException:
+        pass
+    return ""
 
 
 def extract_search_sources(interaction: Any) -> list[ResearchSource]:
@@ -608,7 +673,7 @@ def extract_search_sources(interaction: Any) -> list[ResearchSource]:
             for annotation in _obj_value(block, "annotations", []) or []:
                 if _obj_value(annotation, "type", "") != "url_citation":
                     continue
-                url = normalize_url(str(_obj_value(annotation, "url", "")))
+                url = resolve_source_url(str(_obj_value(annotation, "url", "")))
                 if not url or url in seen:
                     continue
                 seen.add(url)
@@ -763,7 +828,7 @@ def dedupe_sources(sources: list[ResearchSource]) -> list[ResearchSource]:
     result: list[ResearchSource] = []
     seen: set[str] = set()
     for source in sources:
-        url = normalize_url(source.url)
+        url = resolve_source_url(source.url)
         if not url or url in seen:
             continue
         seen.add(url)
@@ -907,6 +972,25 @@ def safe_fix_content(content: str) -> tuple[str, list[str]]:
         changed.append("공개 본문의 자동검수 안내 제거")
     content = updated
 
+    policy_fixed = re.sub(
+        r'href=(["\'])(?:https?://(?:www\.)?taxonguru\.com)?/ai-policy/?\1',
+        lambda m: f'href={m.group(1)}/ai-use-policy/{m.group(1)}',
+        content,
+        flags=re.I,
+    )
+    if policy_fixed != content:
+        changed.append("구형 AI 정책 링크를 /ai-use-policy/로 통일")
+    content = policy_fixed
+
+    if "/ai-use-policy/" not in content:
+        content += (
+            '<section class="taxonguru-editorial-note"><h2>자료와 편집 원칙</h2>'
+            '<p>이 글의 편집 기준과 AI 사용 범위는 '
+            '<a href="/ai-use-policy/">AI 활용 정책</a>과 '
+            '<a href="/editorial-policy/">편집 및 팩트체크 정책</a>에서 확인할 수 있습니다.</p></section>'
+        )
+        changed.append("AI/편집 정책 링크 추가")
+
     replacements = {
         "수석 고생물학자": "TaxonGuru 편집팀",
         "수석 생물학자": "TaxonGuru 편집팀",
@@ -1022,7 +1106,7 @@ def build_references(package: ResearchPackage, language: Literal["ko", "en"]) ->
     note = (
         f'<section class="taxonguru-editorial-note"><h2>{"자료와 편집 원칙" if language == "ko" else "Sources and editorial policy"}</h2>'
         f'<p>{"공개된 학술·기관 자료를 바탕으로 기존 글을 재검토하고 갱신했습니다." if language == "ko" else "This article was reviewed and updated using public scientific and institutional sources."} '
-        f'<a href="/ai-policy/">{"AI 활용 및 편집 정책" if language == "ko" else "AI and editorial policy"}</a></p></section>'
+        f'<a href="/ai-use-policy/">{"AI 활용 및 편집 정책" if language == "ko" else "AI and editorial policy"}</a></p></section>'
     )
     return note + f'<section class="taxonguru-references"><h2>{heading}</h2><ol>' + "".join(items) + "</ol></section>"
 
@@ -1047,9 +1131,15 @@ Article:
     if language == "ko" and len(text_only(body)) < 2200:
         result.passed = False
         result.style_issues.append("한국어 본문 2,200자 미만")
+    if language == "ko" and re.search(r"[\u3400-\u4DBF\u4E00-\u9FFF\u3040-\u30FF]", text_only(body)):
+        result.passed = False
+        result.style_issues.append("한국어 본문에 중국어 한자/일본어 가나 혼입")
     if language == "en" and len(re.findall(r"\b[A-Za-z][A-Za-z'-]*\b", text_only(body))) < 850:
         result.passed = False
         result.style_issues.append("영문 본문 850단어 미만")
+    if language == "en" and re.search(r"[가-힣\u3400-\u4DBF\u4E00-\u9FFF\u3040-\u30FF]", text_only(body)):
+        result.passed = False
+        result.style_issues.append("영문 본문에 한국어/CJK 문자 혼입")
     return result
 
 
@@ -1211,6 +1301,26 @@ def process_post(
             log(f"    ⚠️ Google Search 연구 실패, 기관/API 자료로 계속: {' '.join(str(exc).split())[:350]}")
         sources = dedupe_sources(search_sources + seed_sources)
         decision = audit_decision(post, structural, scientific_name, memo, sources)
+        hard_rewrite_issues = [
+            issue for issue in structural.issues
+            if issue.startswith((
+                "본문 분량 부족",
+                "외부 출처 링크 3개 미만",
+                "참고자료 섹션 없음",
+                "이미지 권리정보 없음",
+                "Google/Vertex 중계 출처 링크",
+                "한국어 본문에 중국어",
+                "영문 본문에 한국어",
+                "한 페이지 내 한영 본문 혼합",
+                "고정형 AI 템플릿 흔적",
+            ))
+        ]
+        if len(sources) < MIN_SOURCE_COUNT:
+            hard_rewrite_issues.append(f"검증 가능한 직접 출처 {len(sources)}개로 최소 {MIN_SOURCE_COUNT}개 미만")
+        if hard_rewrite_issues and decision.grade == "A":
+            decision.grade = "B"
+            decision.recommended_action = "전면재작성"
+            decision.reason = "자동 강등: " + "; ".join(hard_rewrite_issues[:4])
         combined_score = round((structural.score * 0.35) + (decision.factual_score * 0.45) + (decision.editorial_score * 0.20))
 
         if AUDIT_MODE == "safe_fix":
@@ -1224,12 +1334,47 @@ def process_post(
         elif AUDIT_MODE == "rewrite_recent":
             # A: 정확성과 편집 품질이 충분하면 공개 상태를 유지하고 정리 완료로 표시합니다.
             if decision.grade == "A":
-                actual_action = "A등급 공개 유지"
-                update_topic(
-                    "기존검수완료",
-                    quality_score=combined_score,
-                    source_count=len(sources),
-                )
+                fixed_content, changes = safe_fix_content(original_content)
+                if ADSENSE_RECOVERY_MODE:
+                    # AdSense recovery does not treat an automatic A grade as a substitute for
+                    # human editorial review. Keep the URL/post recoverable, but require a person
+                    # to open the WordPress draft and publish it deliberately.
+                    wp_request(
+                        "POST",
+                        f"posts/{post_id}",
+                        json={"content": fixed_content, "status": "draft"},
+                    )
+                    if topic and topic.en_post_id:
+                        try:
+                            wp_request("POST", f"posts/{topic.en_post_id}", json={"status": "draft"})
+                        except Exception as exc:
+                            log(
+                                "    ⚠️ A등급 기존 영문 글 초안 전환 실패: "
+                                + " ".join(str(exc).split())[:300]
+                            )
+                    actual_action = "A등급 자동 감사 통과 / 사람 검수용 초안 전환"
+                    if changes:
+                        actual_action += " / 안전보완: " + ", ".join(changes[:4])
+                    update_topic(
+                        "기존수동검수대기",
+                        quality_score=combined_score,
+                        source_count=len(sources),
+                        public_url="",
+                        en_public_url="",
+                        cleanup_note="자동 감사 A등급 통과. AdSense 복구모드에서 사람 검수 후 직접 공개 필요",
+                    )
+                else:
+                    if fixed_content != original_content:
+                        wp_request("POST", f"posts/{post_id}", json={"content": fixed_content})
+                    actual_action = "A등급 공개 유지(자동 감사 통과)"
+                    if changes:
+                        actual_action += " / 안전보완: " + ", ".join(changes[:4])
+                    update_topic(
+                        "기존검수완료",
+                        quality_score=combined_score,
+                        source_count=len(sources),
+                        cleanup_note="자동 감사 통과 및 공개 상태 유지" + (" / 안전보완 적용" if changes else ""),
+                    )
 
             # D: 영구 삭제하지 않고 초안으로 숨긴 뒤, 기본값에서는 자동 재작성 대기열로 보냅니다.
             elif decision.grade == "D":
@@ -1265,7 +1410,7 @@ def process_post(
         if "비공개" in actual_action or "휴지통" in actual_action:
             audit_state = "초안전환"
         if decision.grade == "A":
-            audit_state = "유지"
+            audit_state = "초안전환" if ADSENSE_RECOVERY_MODE else "유지"
 
         return {
             "감사상태": audit_state,

@@ -65,6 +65,13 @@ BODY_IMAGE_MAX_WIDTH = max(320, int(os.getenv("BODY_IMAGE_MAX_WIDTH", "720")))
 BODY_IMAGE_MAX_HEIGHT = max(240, int(os.getenv("BODY_IMAGE_MAX_HEIGHT", "520")))
 AI_IMAGE_QUALITY = os.getenv("AI_IMAGE_QUALITY", "medium")
 AUTO_SCHEDULE = os.getenv("AUTO_SCHEDULE", "true").lower() == "true"
+ADSENSE_RECOVERY_MODE = os.getenv("ADSENSE_RECOVERY_MODE", "false").lower() == "true"
+MANUAL_REVIEW_REQUIRED = os.getenv("MANUAL_REVIEW_REQUIRED", "false").lower() == "true"
+# AdSense recovery mode is fail-closed: quality-passed content remains a WordPress draft
+# until the site operator reviews and publishes it manually.
+if ADSENSE_RECOVERY_MODE:
+    MANUAL_REVIEW_REQUIRED = True
+    AUTO_SCHEDULE = False
 DRAFT_ON_REVIEW_FAILURE = os.getenv("DRAFT_ON_REVIEW_FAILURE", "true").lower() == "true"
 DRAFT_STATUS = os.getenv("WP_DRAFT_STATUS", "draft")
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "45"))
@@ -333,6 +340,54 @@ def normalize_url(value: str) -> str:
         return urlunsplit((parts.scheme, parts.netloc, parts.path, clean_query, ""))
     except ValueError:
         return ""
+
+
+SOURCE_INTERMEDIARY_HOSTS = {
+    "vertexaisearch.cloud.google.com",
+    "google.com",
+    "www.google.com",
+    "googleusercontent.com",
+    "www.googleusercontent.com",
+}
+
+
+def is_source_intermediary_url(value: str) -> bool:
+    try:
+        host = (urlsplit(value).hostname or "").casefold()
+    except ValueError:
+        return True
+    if host == "vertexaisearch.cloud.google.com":
+        return True
+    if host in {"google.com", "www.google.com"} and urlsplit(value).path.startswith(("/url", "/search")):
+        return True
+    return host in {"googleusercontent.com", "www.googleusercontent.com"}
+
+
+def resolve_source_url(value: str) -> str:
+    """Return a public destination URL, resolving known Google grounding redirects.
+
+    Google Search grounding annotations can contain an intermediary URL. Those URLs are
+    useful to the model but should not be exposed as a reader-facing reference.
+    """
+    normalized = normalize_url(value)
+    if not normalized:
+        return ""
+    if not is_source_intermediary_url(normalized):
+        return normalized
+    try:
+        response = session.get(
+            normalized,
+            allow_redirects=True,
+            timeout=min(15, REQUEST_TIMEOUT),
+            stream=True,
+        )
+        final_url = normalize_url(str(response.url or ""))
+        response.close()
+        if final_url and not is_source_intermediary_url(final_url):
+            return final_url
+    except requests.RequestException:
+        pass
+    return ""
 
 
 def slugify(value: str) -> str:
@@ -1153,7 +1208,10 @@ def sync_scheduled_posts(
     rows = worksheet.get_all_values()[1:]
     for index, row in enumerate(rows, start=2):
         item = parse_sheet_item(index, row, headers)
-        if "예약" not in item.status and item.status not in {"완료", "한국어공개/영문예약"}:
+        manual_review_state = item.status in {
+            "수동검수대기", "기존수동검수대기", "한국어완료/영문수동검수대기"
+        }
+        if "예약" not in item.status and item.status not in {"완료", "한국어공개/영문예약"} and not manual_review_state:
             continue
         if not item.post_id:
             continue
@@ -1166,6 +1224,30 @@ def sync_scheduled_posts(
             en_status = str(en_post.get("status", "")) if en_post else "disabled"
 
             fields: dict[str, Any] = {}
+
+            # Recovery mode freezes previously scheduled posts before WordPress publishes them.
+            # They become ordinary drafts and move to a manual-review state.
+            if ADSENSE_RECOVERY_MODE:
+                if ko_status == "future":
+                    ko_post = wp_request("POST", f"posts/{item.post_id}", json={"status": DRAFT_STATUS}).json()
+                    ko_status = str(ko_post.get("status", DRAFT_STATUS))
+                    manual_review_state = True
+                    fields.update({
+                        "status": "기존수동검수대기" if legacy_scheduled else "수동검수대기",
+                        "scheduled_date": "",
+                        "cleanup_note": "AdSense 복구모드에서 기존 예약을 중지하고 사람 검수용 초안으로 전환",
+                    })
+                if en_post and en_status == "future":
+                    en_post = wp_request("POST", f"posts/{item.en_post_id}", json={"status": DRAFT_STATUS}).json()
+                    en_status = str(en_post.get("status", DRAFT_STATUS))
+                    fields["en_scheduled_date"] = ""
+                    if ko_status == "publish":
+                        manual_review_state = True
+                        fields.update({
+                            "status": "한국어완료/영문수동검수대기",
+                            "cleanup_note": "AdSense 복구모드에서 영문 예약을 중지하고 사람 검수용 초안으로 전환",
+                        })
+
             if ko_status == "publish":
                 fields["public_url"] = ko_post.get("link", "")
             elif ko_status == "future":
@@ -1173,7 +1255,9 @@ def sync_scheduled_posts(
                 if scheduled:
                     fields["scheduled_date"] = scheduled.strftime("%Y-%m-%d %H:%M %Z")
             elif ko_status == "draft":
-                if legacy_scheduled:
+                if manual_review_state:
+                    pass
+                elif legacy_scheduled:
                     next_attempt = max(1, item.rewrite_attempts)
                     next_state = "기존재작성재시도" if next_attempt < MAX_LEGACY_REWRITE_ATTEMPTS else "기존비공개보류"
                     fields.update({"status": next_state, "error": "재작성 예약글이 초안 상태로 변경되었습니다."})
@@ -1193,7 +1277,21 @@ def sync_scheduled_posts(
                         "en_error": "영문 예약글이 초안 상태로 변경되었습니다.",
                     })
 
-            if ko_status == "publish" and (not ENABLE_ENGLISH or en_status == "publish"):
+            if manual_review_state and ko_status == "publish" and (
+                not ENABLE_ENGLISH or not item.en_post_id or en_status == "publish"
+            ):
+                fields.update({
+                    "status": "기존한영수정완료" if item.status.startswith("기존") else "완료",
+                    "error": "",
+                    "en_error": "",
+                    "cleanup_note": "사람 검수 후 WordPress 공개 완료",
+                })
+            elif manual_review_state and ko_status == "publish" and ENABLE_ENGLISH and item.en_post_id and en_status == "draft":
+                fields.update({
+                    "status": "한국어완료/영문수동검수대기",
+                    "cleanup_note": "한국어 사람 검수 공개 완료 / 영어 초안 검수 대기",
+                })
+            elif ko_status == "publish" and (not ENABLE_ENGLISH or en_status == "publish"):
                 fields.update({
                     "status": "기존한영수정완료" if legacy_scheduled else "완료",
                     "error": "",
@@ -1261,7 +1359,7 @@ def merge_research_sources(*groups: list[ResearchSource], limit: int = 14) -> li
 
     for group in groups:
         for source in group:
-            normalized = normalize_url(source.url)
+            normalized = resolve_source_url(source.url)
             if not normalized or normalized in seen:
                 continue
             seen.add(normalized)
@@ -1479,7 +1577,7 @@ def extract_interaction_citations(interaction: Any) -> list[ResearchSource]:
             for annotation in _obj_value(block, "annotations", []) or []:
                 if _obj_value(annotation, "type", "") != "url_citation":
                     continue
-                url = normalize_url(str(_obj_value(annotation, "url", "")))
+                url = resolve_source_url(str(_obj_value(annotation, "url", "")))
                 if not url:
                     continue
                 title = str(_obj_value(annotation, "title", "")).strip() or url
@@ -1623,7 +1721,7 @@ def normalize_research_package(package: ResearchPackage, fallback_name: str) -> 
     for old_index, source in enumerate(package.sources, start=1):
         if cited_numbers and old_index not in cited_numbers:
             continue
-        normalized = normalize_url(source.url)
+        normalized = resolve_source_url(source.url)
         if not normalized or normalized in seen:
             continue
         seen.add(normalized)
@@ -1919,11 +2017,14 @@ def article_body_prompt(
 7. 보고서식 '핵심 요약'으로 시작하지 말고 장면·질문·의외의 사실 중 하나로 시작한다.
 8. 주제에 맞는 자연스러운 소제목 4~7개를 사용하고, 문단은 보통 2~4문장으로 구성한다.
 9. 전문용어는 먼저 쉬운 말로 설명하고 필요할 때 괄호 안에 용어를 쓴다.
-10. [[IMAGE_1]]과 [[IMAGE_2]]를 서로 다른 적절한 위치에 각각 정확히 한 번 넣는다.
-11. 참고문헌·이미지 출처·자동검수·예약시간·AI 안내는 본문에 쓰지 않는다.
-12. WordPress 본문용 HTML만 출력한다. h1, script, style, iframe, form은 사용하지 않는다.
-13. 순수 본문 기준 약 3,000~4,800자. 반복으로 분량을 채우지 않는다.
-14. 마지막은 도입부의 장면이나 질문으로 돌아가 자연스럽게 마무리한다.
+10. 서로 다른 검증 사실 2개 이상을 연결해 독자가 “그래서 왜 중요한가”를 이해할 수 있는 편집적 설명을 최소 한 구간 포함한다. 단, 자료에 없는 결론은 만들지 않는다.
+11. 모든 글에 똑같은 소제목을 반복하지 말고 주제에 맞는 질문·비교·오해 바로잡기 중 최소 하나를 포함한다.
+12. [[IMAGE_1]]과 [[IMAGE_2]]를 서로 다른 적절한 위치에 각각 정확히 한 번 넣는다.
+13. 참고문헌·이미지 출처·자동검수·예약시간·AI 안내는 본문에 쓰지 않는다.
+14. WordPress 본문용 HTML만 출력한다. h1, script, style, iframe, form은 사용하지 않는다.
+15. 순수 본문 기준 약 3,000~4,800자. 반복으로 분량을 채우지 않는다.
+16. 마지막은 도입부의 장면이나 질문으로 돌아가 자연스럽게 마무리한다.
+17. 한국어 문장에 중국어 한자나 일본어 가나를 혼입하지 않는다. 학명은 라틴 알파벳으로 쓴다.
 """
     else:
         language_rules = f"""
@@ -1944,12 +2045,14 @@ Non-negotiable rules
 7. Open with a scene, question, or surprising source-backed fact—not a report-style summary.
 8. Use four to seven topic-specific headings and compact paragraphs, usually two to four sentences.
 9. Explain technical terms in plain English before using the formal term.
-10. Insert [[IMAGE_1]] and [[IMAGE_2]] exactly once each in two useful locations.
-11. Do not include references, image credits, automated review details, scheduling details, or AI disclosure in the body.
-12. Output clean WordPress body HTML only. Do not use h1, script, style, iframe, or form tags.
-13. Write 1,000–1,500 substantive words without padding or repetition.
-14. End by returning to the opening image or question.
-15. Write English only; do not include Korean text.
+10. Include at least one editorial synthesis that connects two or more verified facts to answer why the subject matters, without inventing a conclusion.
+11. Avoid a fixed reusable outline. Include at least one topic-specific question, comparison, or myth correction when the research package supports it.
+12. Insert [[IMAGE_1]] and [[IMAGE_2]] exactly once each in two useful locations.
+13. Do not include references, image credits, automated review details, scheduling details, or AI disclosure in the body.
+14. Output clean WordPress body HTML only. Do not use h1, script, style, iframe, or form tags.
+15. Write 1,000–1,500 substantive words without padding or repetition.
+16. End by returning to the opening image or question.
+17. Write English only; do not include Korean, CJK ideographs, or Japanese kana.
 """
 
     revision = f"\nRevision requirements from the previous review:\n{revision_context}\n" if revision_context else ""
@@ -2170,18 +2273,21 @@ def hidden_review_comment(
 
 
 def editorial_disclosure_html(language: Literal["ko", "en"]) -> str:
-    policy_url = f"{WP_SITE_URL}/ai-use-policy/"
+    ai_policy_url = f"{WP_SITE_URL}/ai-use-policy/"
+    editorial_policy_url = f"{WP_SITE_URL}/editorial-policy/"
     if language == "ko":
         return (
             '<div class="taxonguru-editorial-note"><h2>자료와 편집 원칙</h2>'
             "<p>이 글은 공개된 학술·기관 자료를 바탕으로 작성되었으며, 주요 사실은 아래 참고자료에서 확인할 수 있습니다. "
-            f'작성 과정은 <a href="{html.escape(policy_url, quote=True)}">AI 활용 및 편집 정책</a>에 공개합니다. '
+            f'<a href="{html.escape(editorial_policy_url, quote=True)}">편집 및 팩트체크 정책</a>과 '
+            f'<a href="{html.escape(ai_policy_url, quote=True)}">AI 활용 정책</a>을 공개하고 있습니다. '
             f'오류 제보: <a href="mailto:{html.escape(CONTACT_EMAIL)}">{html.escape(CONTACT_EMAIL)}</a></p></div>'
         )
     return (
         '<div class="taxonguru-editorial-note"><h2>Sources and editorial policy</h2>'
         "<p>This feature is based on publicly available scientific and institutional sources listed below. "
-        f'Read our <a href="{html.escape(policy_url, quote=True)}">AI and editorial policy</a>. '
+        f'Read our <a href="{html.escape(editorial_policy_url, quote=True)}">editorial and fact-checking policy</a> and '
+        f'<a href="{html.escape(ai_policy_url, quote=True)}">AI use policy</a>. '
         f'Report a correction: <a href="mailto:{html.escape(CONTACT_EMAIL)}">{html.escape(CONTACT_EMAIL)}</a></p></div>'
     )
 
@@ -2613,12 +2719,16 @@ def deterministic_quality_issues(
         hangul_chars = len(re.findall(r"[가-힣]", plain_text))
         if hangul_chars < 500 or latin_words > max(180, hangul_chars // 2):
             issues.append("한국어 페이지에 영어 문장이 과도하게 섞였을 가능성이 있습니다.")
+        if re.search(r"[\u3400-\u4DBF\u4E00-\u9FFF\u3040-\u30FF]", plain_text):
+            issues.append("한국어 본문에 중국어 한자 또는 일본어 가나 문자가 혼입되어 있습니다.")
     else:
         word_count = len(re.findall(r"[A-Za-z0-9']+", plain_text))
         if word_count < MIN_ENGLISH_WORDS:
             issues.append(f"영문 본문이 {word_count}단어로 최소 {MIN_ENGLISH_WORDS}단어 미만입니다.")
         if re.search(r"[가-힣]", plain_text):
             issues.append("영어 페이지 본문에 한국어 문자가 포함되어 있습니다.")
+        if re.search(r"[\u3400-\u4DBF\u4E00-\u9FFF\u3040-\u30FF]", plain_text):
+            issues.append("영어 본문에 CJK 문자 또는 일본어 가나가 포함되어 있습니다.")
 
     if len(citation_markers) < MIN_CITATION_MARKERS:
         issues.append(f"본문 인용표시가 {len(citation_markers)}개로 최소 {MIN_CITATION_MARKERS}개 미만입니다.")
@@ -2808,7 +2918,7 @@ def retry_english_article_only(
 
     uploaded = prepare_article_media(item, research)
     featured_media = uploaded[0].media_id if uploaded else None
-    en_scheduled = calculate_next_schedule_datetime(ENGLISH_PUBLISH_HOUR, ENGLISH_PUBLISH_MINUTE)
+    en_scheduled = None if MANUAL_REVIEW_REQUIRED else calculate_next_schedule_datetime(ENGLISH_PUBLISH_HOUR, ENGLISH_PUBLISH_MINUTE)
     en_content = compose_public_content(en_article, research, uploaded, "en", en_scheduled, en_review, en_summary)
     en_category_id = get_or_create_wp_term(english_category_name(item.category), "categories")
     fallback_en_tags = [research.common_name_en, item.scientific_name, english_category_name(item.category)]
@@ -2827,24 +2937,28 @@ def retry_english_article_only(
         featured_media=featured_media,
         category_id=en_category_id,
         tag_ids=en_tag_ids,
-        publish_mode="future",
+        publish_mode="draft" if MANUAL_REVIEW_REQUIRED else "future",
         scheduled_at=en_scheduled,
         post_meta={"_taxonguru_language": "en", "_taxonguru_translation_id": item.post_id},
         existing_post_id=item.en_post_id,
     )
     en_post_id = int(en_post["id"])
     en_status = str(en_post.get("status", DRAFT_STATUS))
-    if en_status != "future":
+    if not MANUAL_REVIEW_REQUIRED and en_status != "future":
         raise RuntimeError(f"WordPress가 영문 글의 예약 상태를 반환하지 않았습니다. 실제 상태: {en_status}")
+    if MANUAL_REVIEW_REQUIRED and en_status != DRAFT_STATUS:
+        raise RuntimeError(f"WordPress가 영문 글의 초안 상태를 반환하지 않았습니다. 실제 상태: {en_status}")
 
     linked_payload = link_translation_posts(item.post_id, en_post_id)
     linked = bool(linked_payload.get("linked"))
     en_edit_url = f"{WP_SITE_URL}/wp-admin/post.php?post={en_post_id}&action=edit"
-    en_public_url = linked_payload.get("en_url", en_post.get("link", ""))
-    en_scheduled_text = en_scheduled.strftime("%Y-%m-%d %H:%M %Z")
+    en_public_url = "" if MANUAL_REVIEW_REQUIRED else linked_payload.get("en_url", en_post.get("link", ""))
+    en_scheduled_text = en_scheduled.strftime("%Y-%m-%d %H:%M %Z") if en_scheduled else ""
     ko_post = get_post(item.post_id)
     ko_status = str(ko_post.get("status", ""))
-    if legacy_retry:
+    if MANUAL_REVIEW_REQUIRED:
+        next_status = "기존수동검수대기" if legacy_retry else "한국어완료/영문수동검수대기"
+    elif legacy_retry:
         next_status = "기존한영재예약완료" if ko_status == "future" else "기존한국어공개/영문재예약"
     else:
         next_status = "한영예약완료" if ko_status == "future" else "한국어공개/영문예약"
@@ -2862,11 +2976,18 @@ def retry_english_article_only(
             "en_auto_review_result": en_summary,
             "translation_linked": "완료" if linked else "실패",
             "rewrite_attempts": attempt if legacy_retry else item.rewrite_attempts,
-            "cleanup_note": f"기존 영문판 재작성 완료, {en_scheduled_text} 예약" if legacy_retry else item.cleanup_note,
+            "cleanup_note": (
+                "기존 영문판 자동 품질검수 통과. 사람 검수 후 공개 필요"
+                if MANUAL_REVIEW_REQUIRED and legacy_retry
+                else (f"기존 영문판 재작성 완료, {en_scheduled_text} 예약" if legacy_retry else item.cleanup_note)
+            ),
             "en_error": "",
         },
     )
-    log(f"  🎉 영문 예약 복구 완료: {en_scheduled_text}")
+    if MANUAL_REVIEW_REQUIRED:
+        log("  👤 영문 자동검수 통과. WordPress 초안에서 사람 검수 후 공개해 주세요.")
+    else:
+        log(f"  🎉 영문 예약 복구 완료: {en_scheduled_text}")
     log(f"  🔗 영어 편집: {en_edit_url}")
 
 
@@ -3017,19 +3138,23 @@ def create_or_schedule_post(
     ko_publish_mode: Literal["future", "draft"] = "draft"
     en_publish_mode: Literal["future", "draft"] = "draft"
 
-    if ko_passed and AUTO_SCHEDULE:
+    if ko_passed and AUTO_SCHEDULE and not MANUAL_REVIEW_REQUIRED:
         ko_scheduled = calculate_next_schedule_datetime(PUBLISH_HOUR, PUBLISH_MINUTE)
         ko_publish_mode = "future"
         log(f"  🗓️ 한국어 예약: {ko_scheduled.strftime('%Y-%m-%d %H:%M %Z')}")
+    elif ko_passed and MANUAL_REVIEW_REQUIRED:
+        log("  👤 한국어 자동검수 통과 → 사람 검수를 위해 WordPress 초안으로 저장합니다.")
     elif not ko_passed:
         log(f"  ⚠️ 한국어 품질 기준 미달: {ko_summary}")
 
     # English is only auto-scheduled when both the Korean source article and English article pass.
     if ENABLE_ENGLISH and en_article and en_review:
-        if ko_passed and en_passed and AUTO_SCHEDULE:
+        if ko_passed and en_passed and AUTO_SCHEDULE and not MANUAL_REVIEW_REQUIRED:
             en_scheduled = calculate_next_schedule_datetime(ENGLISH_PUBLISH_HOUR, ENGLISH_PUBLISH_MINUTE)
             en_publish_mode = "future"
             log(f"  🗓️ 영어 예약: {en_scheduled.strftime('%Y-%m-%d %H:%M %Z')}")
+        elif ko_passed and en_passed and MANUAL_REVIEW_REQUIRED:
+            log("  👤 영어 자동검수 통과 → 사람 검수를 위해 WordPress 초안으로 저장합니다.")
         elif not en_passed:
             log(f"  ⚠️ 영어 품질 기준 미달: {en_summary}")
 
@@ -3102,7 +3227,9 @@ def create_or_schedule_post(
     if en_publish_mode == "future" and en_status != "future":
         raise RuntimeError(f"WordPress가 영문 글의 예약 상태를 반환하지 않았습니다. 실제 상태: {en_status}")
 
-    if ko_status == "future" and (not ENABLE_ENGLISH or en_status == "future"):
+    if MANUAL_REVIEW_REQUIRED and ko_passed:
+        next_state = "기존수동검수대기" if legacy_rewrite else "수동검수대기"
+    elif ko_status == "future" and (not ENABLE_ENGLISH or en_status == "future"):
         if legacy_rewrite:
             next_state = "기존한영재예약완료" if ENABLE_ENGLISH else "기존재예약완료"
         else:
@@ -3143,14 +3270,27 @@ def create_or_schedule_post(
             "en_error": "" if en_passed or not ENABLE_ENGLISH else (en_generation_error or en_summary)[:500],
             "rewrite_attempts": legacy_attempt if legacy_rewrite else item.rewrite_attempts,
             "cleanup_note": (
-                f"기존 글 재작성 완료, 다음 빈 순번 예약: KO {ko_scheduled_text} / EN {en_scheduled_text}"
-                if legacy_rewrite and next_state in LEGACY_SCHEDULED_STATES
-                else item.cleanup_note
+                "기존 글 재작성 및 자동 품질검수 통과. WordPress 초안에서 사람 검수 후 공개 필요"
+                if next_state == "기존수동검수대기"
+                else (
+                    "자동 품질검수 통과. WordPress 초안에서 사람 검수 후 공개 필요"
+                    if next_state == "수동검수대기"
+                    else (
+                        f"기존 글 재작성 완료, 다음 빈 순번 예약: KO {ko_scheduled_text} / EN {en_scheduled_text}"
+                        if legacy_rewrite and next_state in LEGACY_SCHEDULED_STATES
+                        else item.cleanup_note
+                    )
+                )
             ),
         },
     )
 
-    if next_state in {"한영예약완료", "기존한영재예약완료"}:
+    if next_state in {"수동검수대기", "기존수동검수대기"}:
+        log("  👤 자동 품질검수 통과. WordPress 초안에서 내용을 확인한 뒤 직접 공개해 주세요.")
+        log(f"  🔗 한국어 편집: {ko_edit_url}")
+        if en_edit_url:
+            log(f"  🔗 영어 편집: {en_edit_url}")
+    elif next_state in {"한영예약완료", "기존한영재예약완료"}:
         label = "기존 글 한·영 재예약 완료" if next_state == "기존한영재예약완료" else "한·영 예약 완료"
         log(f"  🎉 {label}: KO {ko_scheduled_text} / EN {en_scheduled_text}")
         log(f"  🔗 한국어 편집: {ko_edit_url}")
@@ -3183,7 +3323,8 @@ def main() -> int:
     log("=" * 70)
     log("TaxonGuru 스토리텔링 한·영 자동 품질검수 + 예약 발행 파이프라인")
     log(
-        f"자동 예약: {'ON' if AUTO_SCHEDULE else 'OFF'} · 기준 {MIN_QUALITY_SCORE}점/출처 {MIN_SOURCE_COUNT}개 · "
+        f"자동 예약: {'ON' if AUTO_SCHEDULE else 'OFF'} · 사람 검수: {'필수' if MANUAL_REVIEW_REQUIRED else '선택'} · "
+        f"AdSense 복구모드: {'ON' if ADSENSE_RECOVERY_MODE else 'OFF'} · 기준 {MIN_QUALITY_SCORE}점/출처 {MIN_SOURCE_COUNT}개 · "
         f"KO {PUBLISH_HOUR:02d}:{PUBLISH_MINUTE:02d} / EN {ENGLISH_PUBLISH_HOUR:02d}:{ENGLISH_PUBLISH_MINUTE:02d} "
         f"{SCHEDULE_TIMEZONE} · 영어 {'ON' if ENABLE_ENGLISH else 'OFF'} · "
         f"AI 대표 {'ON' if ALLOW_AI_FEATURED_IMAGE else 'OFF'} / AI 본문 {'ON' if GENERATE_AI_BODY_IMAGES else 'OFF'} · 본문 이미지 최대 {BODY_IMAGE_MAX_WIDTH}px"

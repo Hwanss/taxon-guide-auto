@@ -15,7 +15,7 @@ import requests
 import urllib3.util.connection as urllib3_connection
 
 # =============================================================================
-# TaxonGuru Master Controller v5
+# TaxonGuru Master Controller v6 · AdSense Recovery
 #
 # Priority
 # 1) Sync already scheduled posts.
@@ -45,6 +45,8 @@ NEW_WINDOW_START_HOUR = int(os.getenv("NEW_WINDOW_START_HOUR", "2"))
 NEW_WINDOW_END_HOUR = int(os.getenv("NEW_WINDOW_END_HOUR", "7"))
 FORCE_PHASE = os.getenv("FORCE_PHASE", "auto").strip().lower()
 FORCE_NEW_NOW = os.getenv("FORCE_NEW_NOW", "false").lower() == "true"
+ADSENSE_RECOVERY_MODE = os.getenv("ADSENSE_RECOVERY_MODE", "false").lower() == "true"
+MANUAL_REVIEW_REQUIRED = os.getenv("MANUAL_REVIEW_REQUIRED", "false").lower() == "true" or ADSENSE_RECOVERY_MODE
 FORCE_IPV4 = os.getenv("FORCE_IPV4", "true").lower() == "true"
 REQUEST_TIMEOUT = max(15, int(os.getenv("REQUEST_TIMEOUT", "45")))
 WP_CONNECT_RETRIES = max(1, int(os.getenv("WP_CONNECT_RETRIES", "5")))
@@ -64,6 +66,11 @@ LEGACY_SCHEDULED_STATES = {
 ENGLISH_REPAIR_STATES = {
     "한국어예약/영문검수필요",
     "한국어완료/영문검수필요",
+}
+MANUAL_REVIEW_STATES = {
+    "수동검수대기",
+    "기존수동검수대기",
+    "한국어완료/영문수동검수대기",
 }
 
 
@@ -331,6 +338,7 @@ def summary_values(counts: Counter[str]) -> dict[str, Any]:
         "한영예약완료보존": counts.get("한영예약완료", 0),
         "대기주제": counts.get("대기", 0),
         "영문재검수": count_any(counts, ENGLISH_REPAIR_STATES),
+        "수동검수대기": count_any(counts, MANUAL_REVIEW_STATES),
     }
 
 
@@ -338,7 +346,12 @@ def sync_reservations(topic_ws: gspread.Worksheet, control_ws: gspread.Worksheet
     code = run_script(
         "WordPress 예약 상태 동기화",
         "main.py",
-        {"PROCESS_MODE": "sync_only", "FORCE_IPV4": "true"},
+        {
+            "PROCESS_MODE": "sync_only",
+            "FORCE_IPV4": "true",
+            "ADSENSE_RECOVERY_MODE": "true" if ADSENSE_RECOVERY_MODE else "false",
+            "MANUAL_REVIEW_REQUIRED": "true" if MANUAL_REVIEW_REQUIRED else "false",
+        },
     )
     if code != 0:
         _, _, counts = read_sheet(topic_ws)
@@ -370,7 +383,9 @@ def process_one_legacy_rewrite(topic_ws: gspread.Worksheet, control_ws: gspread.
             "PROCESS_MODE": "legacy_rewrite",
             "FORCE_IPV4": "true",
             "ENABLE_ENGLISH": "true",
-            "AUTO_SCHEDULE": "true",
+            "AUTO_SCHEDULE": "false" if MANUAL_REVIEW_REQUIRED else "true",
+            "ADSENSE_RECOVERY_MODE": "true" if ADSENSE_RECOVERY_MODE else "false",
+            "MANUAL_REVIEW_REQUIRED": "true" if MANUAL_REVIEW_REQUIRED else "false",
         },
     )
     _, _, after = read_sheet(topic_ws)
@@ -387,10 +402,11 @@ def process_one_legacy_rewrite(topic_ws: gspread.Worksheet, control_ws: gspread.
 
 def main() -> int:
     log("=" * 76)
-    log("TaxonGuru Master v5: 오류 자동복구 → 기존 감사 → 비공개 재작성 → 다음 빈 순번 예약 → 신규 자동운영")
+    log("TaxonGuru Master v6: AdSense 복구 → 기존 감사 → 안전 재작성 → 사람 검수 대기")
     log(
         f"기존 감사 대상='{LEGACY_TARGET_STATUS}' 정확히 일치 · 감사 회당 {LEGACY_BATCH_SIZE}건 · "
-        f"재작성 최대 {os.getenv('MAX_LEGACY_REWRITE_ATTEMPTS', '3')}회"
+        f"재작성 최대 {os.getenv('MAX_LEGACY_REWRITE_ATTEMPTS', '3')}회 · "
+        f"AdSense 복구={'ON' if ADSENSE_RECOVERY_MODE else 'OFF'} · 사람검수={'필수' if MANUAL_REVIEW_REQUIRED else '선택'}"
     )
     log("=" * 76)
 
@@ -434,6 +450,21 @@ def main() -> int:
         update_control(control_ws, 단계="상태확인", 결과="변경 없이 상태만 확인했습니다.", **summary_values(counts), 다음작업="자동 운영", 오류="")
         return 0
 
+    if FORCE_PHASE == "readiness":
+        update_control(
+            control_ws,
+            단계="애드센스준비도검사",
+            결과="필수 페이지, ads.txt, 공개 글 링크/언어 이상을 검사합니다.",
+            **summary_values(counts),
+            다음작업="site_readiness.py",
+            오류="",
+        )
+        return run_script(
+            "AdSense 재심사 준비도 검사",
+            "site_readiness.py",
+            {"FORCE_IPV4": "true", "READINESS_APPLY_SAFE_FIXES": "true"},
+        )
+
     # 1) Existing rewrite queue has absolute priority.
     if FORCE_PHASE in {"auto", "cleanup"} and count_any(counts, LEGACY_REWRITE_STATES) > 0:
         return process_one_legacy_rewrite(topic_ws, control_ws)
@@ -465,6 +496,7 @@ def main() -> int:
                 "AUDIT_DRAFT_GRADE_D": "true",
                 "AUDIT_INCLUDE_ENGLISH_POSTS": "false",
                 "FORCE_IPV4": "true",
+                "ADSENSE_RECOVERY_MODE": "true" if ADSENSE_RECOVERY_MODE else "false",
             },
         )
         _, _, after = read_sheet(topic_ws)
@@ -482,10 +514,23 @@ def main() -> int:
         return code
 
     if FORCE_PHASE == "cleanup":
-        update_control(control_ws, 단계="기존정리완료", 결과="감사·재작성 대기 대상이 없습니다.", **summary_values(counts), 다음작업="예약 발행 완료 대기 또는 신규 단계", 오류="")
+        update_control(control_ws, 단계="기존정리완료", 결과="감사·재작성 대기 대상이 없습니다.", **summary_values(counts), 다음작업="수동검수 또는 준비도 검사", 오류="")
         return 0
 
-    # 3) Do not start new work until repaired legacy reservations are published.
+    # 3) AdSense recovery mode intentionally stops all new/automatic publication.
+    if ADSENSE_RECOVERY_MODE:
+        update_control(
+            control_ws,
+            단계="애드센스복구모드",
+            결과="기존 공개 글 감사가 완료되었습니다. 신규 자동발행은 중지되어 있습니다.",
+            **summary_values(counts),
+            다음작업="WordPress 초안의 수동검수 → 준비도 검사(readiness) → AdSense 재검토",
+            오류="",
+        )
+        log("🛡️ AdSense 복구모드: 신규 주제 생성·자동 예약발행을 실행하지 않습니다.")
+        return 0
+
+    # 4) Do not start new work until repaired legacy reservations are published.
     if count_any(counts, LEGACY_SCHEDULED_STATES) > 0:
         update_control(
             control_ws,
@@ -503,7 +548,11 @@ def main() -> int:
         code = run_script(
             "영문판 자동 복구",
             "main.py",
-            {"PROCESS_MODE": "english_retry", "FORCE_IPV4": "true", "ENABLE_ENGLISH": "true", "AUTO_SCHEDULE": "true"},
+            {
+                "PROCESS_MODE": "english_retry", "FORCE_IPV4": "true", "ENABLE_ENGLISH": "true",
+                "AUTO_SCHEDULE": "false" if MANUAL_REVIEW_REQUIRED else "true",
+                "MANUAL_REVIEW_REQUIRED": "true" if MANUAL_REVIEW_REQUIRED else "false",
+            },
         )
         return code
 
@@ -530,7 +579,11 @@ def main() -> int:
     code = run_script(
         "신규 한·영 게시물 작성",
         "main.py",
-        {"PROCESS_MODE": "new", "FORCE_IPV4": "true", "ENABLE_ENGLISH": "true", "AUTO_SCHEDULE": "true"},
+        {
+            "PROCESS_MODE": "new", "FORCE_IPV4": "true", "ENABLE_ENGLISH": "true",
+            "AUTO_SCHEDULE": "false" if MANUAL_REVIEW_REQUIRED else "true",
+            "MANUAL_REVIEW_REQUIRED": "true" if MANUAL_REVIEW_REQUIRED else "false",
+        },
     )
     _, _, after = read_sheet(topic_ws)
     if code == 0 and after.get("대기", 0) < TOPIC_REFILL_THRESHOLD:
