@@ -15,7 +15,7 @@ import requests
 import urllib3.util.connection as urllib3_connection
 
 # =============================================================================
-# TaxonGuru Master Controller v6 · AdSense Recovery
+# TaxonGuru Master Controller v6.1 · AdSense Recovery
 #
 # Priority
 # 1) Sync already scheduled posts.
@@ -67,6 +67,8 @@ ENGLISH_REPAIR_STATES = {
     "한국어예약/영문검수필요",
     "한국어완료/영문검수필요",
 }
+EXTERNAL_API_PAUSE_EXIT_CODE = 75
+
 MANUAL_REVIEW_STATES = {
     "수동검수대기",
     "기존수동검수대기",
@@ -276,12 +278,79 @@ def recover_known_cleanup_errors(
     return result
 
 
+def _is_external_api_limit_text(value: str) -> bool:
+    text = str(value or "").casefold()
+    markers = (
+        "monthly spending cap",
+        "spend cap",
+        "resource_exhausted",
+        "too_many_requests",
+        "rate limit",
+        "quota exceeded",
+        "exceeded your current quota",
+        "error code: 429",
+        "'code': 429",
+        '"code": 429',
+    )
+    return any(marker in text for marker in markers)
+
+
+def recover_v6_quota_consumed_attempts(
+    topic_ws: gspread.Worksheet,
+    headers: list[str],
+    rows: list[list[str]],
+) -> int:
+    """Undo the v6.0 bug that counted Gemini 429/spend-cap outages as rewrite failures.
+
+    Only rows currently held because of an external quota/billing message are touched.
+    One consumed attempt is restored and the row is returned to the rewrite queue.
+    """
+    status_idx = find_header(headers, ["상태"])
+    error_idx = find_header(headers, ["오류", "에러"])
+    attempt_idx = find_header(headers, ["재작성시도", "재작성 시도"])
+    note_idx = find_header(headers, ["정리메모", "정리 메모"])
+    sci_idx = find_header(headers, ["학명", "학명(Scientific Name)", "학명 (Scientific Name)"])
+    post_idx = find_header(headers, ["WP_POST_ID", "WP POST ID"])
+    if status_idx is None or error_idx is None:
+        return 0
+
+    cells: list[gspread.Cell] = []
+    recovered = 0
+    for row_number, row in enumerate(rows, start=2):
+        status = _row_value(row, status_idx)
+        error_text = _row_value(row, error_idx)
+        if status not in {"기존비공개보류", "기존재작성재시도"}:
+            continue
+        if not _is_external_api_limit_text(error_text):
+            continue
+        scientific_name = _row_value(row, sci_idx)
+        post_id = safe_int(_row_value(row, post_idx))
+        if not scientific_name or not post_id:
+            continue
+        current_attempt = safe_int(_row_value(row, attempt_idx)) or 0
+        restored_attempt = max(0, current_attempt - 1) if status == "기존비공개보류" else current_attempt
+        cells.append(gspread.Cell(row_number, status_idx + 1, "기존재작성재시도"))
+        if attempt_idx is not None:
+            cells.append(gspread.Cell(row_number, attempt_idx + 1, str(restored_attempt)))
+        if note_idx is not None:
+            cells.append(gspread.Cell(
+                row_number, note_idx + 1,
+                "v6.1 자동복구: Gemini API 429/지출한도 오류는 콘텐츠 실패가 아니므로 재작성 시도 횟수를 복원했습니다.",
+            ))
+        if error_idx is not None:
+            cells.append(gspread.Cell(row_number, error_idx + 1, ""))
+        recovered += 1
+    if cells:
+        topic_ws.update_cells(cells, value_input_option="USER_ENTERED")
+    return recovered
+
+
 def update_control(control_ws: gspread.Worksheet, **data: Any) -> None:
     now = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S %Z")
     rows = [["항목", "값"], ["최근실행", now]]
     rows.extend([[str(key), str(value)] for key, value in data.items()])
     control_ws.clear()
-    control_ws.update("A1", rows, value_input_option="USER_ENTERED")
+    control_ws.update(values=rows, range_name="A1", value_input_option="USER_ENTERED")
 
 
 def preflight_wordpress() -> tuple[bool, str]:
@@ -389,6 +458,17 @@ def process_one_legacy_rewrite(topic_ws: gspread.Worksheet, control_ws: gspread.
         },
     )
     _, _, after = read_sheet(topic_ws)
+    if code == EXTERNAL_API_PAUSE_EXIT_CODE:
+        update_control(
+            control_ws,
+            단계="외부AI한도대기",
+            결과="Gemini API 월 지출한도/쿼터로 이번 재작성만 안전 보류했습니다. 재작성 시도 횟수는 차감하지 않았습니다.",
+            **summary_values(after),
+            다음작업="Google AI Studio의 Spend/Billing 확인 후 다음 자동 실행에서 재시도",
+            오류="",
+        )
+        log("⏸️ Gemini API 한도/결제 제한: 콘텐츠 실패로 계산하지 않고 작업을 보류했습니다.")
+        return 0
     update_control(
         control_ws,
         단계="기존글자동재작성" if count_any(after, LEGACY_REWRITE_STATES) else "기존재작성대기열소진",
@@ -402,7 +482,7 @@ def process_one_legacy_rewrite(topic_ws: gspread.Worksheet, control_ws: gspread.
 
 def main() -> int:
     log("=" * 76)
-    log("TaxonGuru Master v6: AdSense 복구 → 기존 감사 → 안전 재작성 → 사람 검수 대기")
+    log("TaxonGuru Master v6.1: AdSense 복구 → 기존 감사 → 안전 재작성 → 사람 검수 대기")
     log(
         f"기존 감사 대상='{LEGACY_TARGET_STATUS}' 정확히 일치 · 감사 회당 {LEGACY_BATCH_SIZE}건 · "
         f"재작성 최대 {os.getenv('MAX_LEGACY_REWRITE_ATTEMPTS', '3')}회 · "
@@ -439,6 +519,13 @@ def main() -> int:
             f"재작성대기 {recovery['requeued']} / 이미공개완료 {recovery['published']} / "
             f"예약복구 {recovery['scheduled']} / 보류 {recovery['held']}"
         )
+        headers, rows, counts = read_sheet(topic_ws)
+
+    # Undo v6.0 rows that were incorrectly held because a Gemini 429/spend-cap
+    # outage consumed the final rewrite attempt. This runs once per affected row.
+    quota_recovered = recover_v6_quota_consumed_attempts(topic_ws, headers, rows)
+    if quota_recovered:
+        log(f"🩹 v6.1 Gemini 한도오류 시도횟수 자동복구: {quota_recovered}건")
         headers, rows, counts = read_sheet(topic_ws)
 
     # Always synchronize future→publish before deciding the next phase.
@@ -500,6 +587,16 @@ def main() -> int:
             },
         )
         _, _, after = read_sheet(topic_ws)
+        if code == EXTERNAL_API_PAUSE_EXIT_CODE:
+            update_control(
+                control_ws,
+                단계="외부AI한도대기",
+                결과="Gemini API 월 지출한도/쿼터로 기존 글 감사를 변경 없이 보류했습니다.",
+                **summary_values(after),
+                다음작업="Google AI Studio의 Spend/Billing 확인 후 다음 자동 실행에서 재시도",
+                오류="",
+            )
+            return 0
         if code == 0 and count_any(after, LEGACY_REWRITE_STATES) > 0:
             # Complete one full audit→rewrite cycle in the same workflow run.
             return process_one_legacy_rewrite(topic_ws, control_ws)

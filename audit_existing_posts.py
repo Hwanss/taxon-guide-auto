@@ -240,6 +240,26 @@ def log(message: str) -> None:
     print(message, flush=True)
 
 
+EXTERNAL_API_PAUSE_EXIT_CODE = 75
+
+
+def is_external_api_limit_error(exc: BaseException | str) -> bool:
+    text = str(exc or "").casefold()
+    markers = (
+        "monthly spending cap",
+        "spend cap",
+        "resource_exhausted",
+        "too_many_requests",
+        "rate limit",
+        "quota exceeded",
+        "exceeded your current quota",
+        "error code: 429",
+        "'code': 429",
+        '"code": 429',
+    )
+    return any(marker in text for marker in markers)
+
+
 def safe_int(value: Any) -> int | None:
     try:
         number = int(str(value).strip())
@@ -372,6 +392,9 @@ def gemini_json(model: str, prompt: str, schema: type[TModel], max_tokens: int =
             return schema.model_validate_json(str(response.text or ""))
         except Exception as exc:
             last_error = exc
+            if is_external_api_limit_error(exc):
+                log(f"    ⏸️ Gemini API 한도/결제 제한 감지 → JSON 재시도를 중단합니다: {' '.join(str(exc).split())[:350]}")
+                raise
             log(f"    ⚠️ JSON 생성 재시도 {attempt}/3: {' '.join(str(exc).split())[:350]}")
             time.sleep(attempt * 2)
     raise RuntimeError(f"Gemini 구조화 응답 실패: {last_error}")
@@ -396,6 +419,9 @@ def gemini_text(model: str, prompt: str, max_tokens: int = 12288) -> str:
             return value
         except Exception as exc:
             last_error = exc
+            if is_external_api_limit_error(exc):
+                log(f"    ⏸️ Gemini API 한도/결제 제한 감지 → 장문 재시도를 중단합니다: {' '.join(str(exc).split())[:350]}")
+                raise
             log(f"    ⚠️ 장문 생성 재시도 {attempt}/3: {' '.join(str(exc).split())[:350]}")
             time.sleep(attempt * 2)
     raise RuntimeError(f"Gemini 장문 응답 실패: {last_error}")
@@ -1439,9 +1465,29 @@ def process_post(
         }
     except Exception as exc:
         error = " ".join(str(exc).split())[:1000]
-        actual_action = fail_closed(error)
+        if is_external_api_limit_error(exc):
+            # Gemini billing/quota outages are infrastructure failures, not evidence that
+            # a published article is unsafe. Leave WordPress and the topic status unchanged.
+            if topic:
+                try:
+                    update_topic_fields(
+                        topic_ws, topic_headers, topic.row_number,
+                        {
+                            "cleanup_note": "Gemini API 한도/결제 제한으로 감사 일시 보류 — 게시물 상태 변경 없음",
+                            "error": error[:500],
+                        },
+                    )
+                except Exception as sheet_exc:
+                    log(f"    ⚠️ 외부 API 보류 상태 기록 실패: {sheet_exc}")
+            actual_action = "외부AI한도 보류(게시물 변경 없음)"
+            audit_state = "외부API대기"
+            recommended = "AI Studio 한도/결제 확인 후 재시도"
+        else:
+            actual_action = fail_closed(error)
+            audit_state = "초안전환" if "비공개" in actual_action else "오류"
+            recommended = "안전 비공개" if "비공개" in actual_action else "재시도"
         return {
-            "감사상태": "초안전환" if "비공개" in actual_action else "오류",
+            "감사상태": audit_state,
             "감사일시": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "처리모드": AUDIT_MODE,
             "게시물ID": post_id,
@@ -1453,7 +1499,7 @@ def process_post(
             "사실점수": decision.factual_score if decision else "",
             "종합점수": combined_score,
             "등급": decision.grade if decision else "",
-            "권장조치": "안전 비공개" if "비공개" in actual_action else "재시도",
+            "권장조치": recommended,
             "실제처리": actual_action,
             "출처수": len(sources),
             "본문글자수": structural.text_length,
@@ -1542,6 +1588,7 @@ def main() -> int:
         return 0
 
     results: list[dict[str, Any]] = []
+    external_pause = False
     for index, post in enumerate(targets, start=1):
         title = text_only(str(post.get("title", {}).get("raw") or post.get("title", {}).get("rendered") or ""))
         log(f"\n[{index}/{len(targets)}] 감사 시작: Post {post['id']} · {title}")
@@ -1549,8 +1596,14 @@ def main() -> int:
         results.append(result)
         append_audit_row(audit_ws, result)
         log(f"  → 등급 {result.get('등급') or '-'} / {result.get('실제처리')} / {result.get('오류')}")
+        if result.get("감사상태") == "외부API대기":
+            external_pause = True
+            log("  ⏸️ 외부 AI API 한도 문제이므로 남은 감사 대상을 건드리지 않고 이번 실행을 종료합니다.")
+            break
 
     write_reports(results)
+    if external_pause:
+        return EXTERNAL_API_PAUSE_EXIT_CODE
     log("\n✅ 최근 게시물 감사 작업을 완료했습니다. 삭제는 자동으로 수행하지 않았습니다.")
     return 0
 

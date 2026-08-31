@@ -438,6 +438,31 @@ def _short_error(exc: Exception, limit: int = 600) -> str:
     return " ".join(str(exc).split())[:limit]
 
 
+EXTERNAL_API_PAUSE_EXIT_CODE = 75
+
+
+def is_external_api_limit_error(exc: BaseException | str) -> bool:
+    """Return True for quota/billing/rate-limit failures that should not burn rewrite attempts.
+
+    These are infrastructure/account conditions, not article-quality failures.
+    """
+    text = str(exc or "").casefold()
+    markers = (
+        "monthly spending cap",
+        "spend cap",
+        "resource_exhausted",
+        "too_many_requests",
+        "rate limit",
+        "quota exceeded",
+        "exceeded your current quota",
+        "http 429",
+        "error code: 429",
+        "'code': 429",
+        '"code": 429',
+    )
+    return any(marker in text for marker in markers)
+
+
 def _response_finish_reason(response: Any) -> str:
     try:
         candidates = getattr(response, "candidates", None) or []
@@ -513,6 +538,9 @@ Return exactly one complete JSON object matching the schema. Do not echo the pro
         except Exception as exc:
             last_error = exc
             retry_note = _short_error(exc)
+            if is_external_api_limit_error(exc):
+                log(f"  ⏸️ Gemini API 한도/결제 제한 감지 → 불필요한 재시도를 중단합니다: {retry_note}")
+                raise
             log(f"  ⚠️ 구조화 출력 재시도 {attempt}/{attempt_count}: {retry_note}")
             if attempt < attempt_count:
                 time.sleep(min(2 * attempt, 6))
@@ -592,6 +620,9 @@ Produce a fresh, complete article. Do not echo the prompt or research JSON.
         except Exception as exc:
             last_error = exc
             retry_note = _short_error(exc)
+            if is_external_api_limit_error(exc):
+                log(f"  ⏸️ Gemini API 한도/결제 제한 감지 → 불필요한 재시도를 중단합니다: {retry_note}")
+                raise
             log(f"  ⚠️ 장문 출력 재시도 {attempt}/{attempt_count}: {retry_note}")
             if attempt < attempt_count:
                 time.sleep(min(2 * attempt, 6))
@@ -3349,10 +3380,50 @@ def main() -> int:
         create_or_schedule_post(worksheet, headers, item)
         return 0
     except Exception as exc:
-        log(f"\n❌ 처리 실패: {exc}")
+        external_limit = is_external_api_limit_error(exc)
+        if external_limit:
+            log(f"\n⏸️ 외부 AI API 한도/결제 제한으로 작업을 안전 보류합니다: {_short_error(exc)}")
+        else:
+            log(f"\n❌ 처리 실패: {exc}")
+
         if worksheet is not None and item is not None:
             try:
-                if item.status in LEGACY_REWRITE_STATES or item.status == "기존재작성중":
+                if external_limit:
+                    # create_or_schedule_post() increments the visible attempt before calling Gemini.
+                    # A 429/spend-cap failure is not a content rewrite failure, so restore the
+                    # original attempt count and make the row retryable.
+                    if item.status in LEGACY_REWRITE_STATES or item.status == "기존재작성중":
+                        update_sheet_fields(
+                            worksheet, headers, item.row_number,
+                            {
+                                "status": "기존재작성재시도",
+                                "rewrite_attempts": item.rewrite_attempts,
+                                "cleanup_note": "Gemini API 한도/결제 제한으로 일시 보류 — 재작성 시도 횟수 차감 없음",
+                                "error": _short_error(exc, 500),
+                            },
+                        )
+                    elif item.status in {
+                        "한국어예약/영문검수필요",
+                        "한국어완료/영문검수필요",
+                        "기존한국어재예약/영문검수필요",
+                    }:
+                        update_sheet_fields(
+                            worksheet, headers, item.row_number,
+                            {
+                                "status": item.status,
+                                "cleanup_note": "Gemini API 한도/결제 제한으로 영문 복구 일시 보류",
+                                "error": _short_error(exc, 500),
+                            },
+                        )
+                    else:
+                        update_sheet_fields(
+                            worksheet, headers, item.row_number,
+                            {
+                                "status": item.status or "대기",
+                                "error": _short_error(exc, 500),
+                            },
+                        )
+                elif item.status in LEGACY_REWRITE_STATES or item.status == "기존재작성중":
                     attempts = max(1, item.rewrite_attempts + (0 if item.status == "기존재작성중" else 1))
                     status = "기존재작성재시도" if attempts < MAX_LEGACY_REWRITE_ATTEMPTS else "기존비공개보류"
                     update_sheet_fields(
@@ -3371,7 +3442,7 @@ def main() -> int:
                     )
             except Exception as sheet_error:
                 log(f"  ⚠️ 시트 오류 기록 실패: {sheet_error}")
-        return 1
+        return EXTERNAL_API_PAUSE_EXIT_CODE if external_limit else 1
 
 
 if __name__ == "__main__":
