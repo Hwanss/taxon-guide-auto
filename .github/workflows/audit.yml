@@ -1,24 +1,24 @@
-name: TaxonGuru Master Cleanup & Publish v5
+name: TaxonGuru AdSense Recovery v6
 
 concurrency:
-  group: taxonguru-master-pipeline
+  group: taxonguru-adsense-recovery
   cancel-in-progress: false
 
 on:
   workflow_dispatch:
     inputs:
       force_phase:
-        description: '자동 운영 단계 강제 선택'
+        description: '실행 단계'
         required: true
         default: 'auto'
         type: choice
         options:
           - auto
           - cleanup
-          - new
+          - readiness
           - status_only
       legacy_batch_size:
-        description: '기존 완료 글 회당 감사 건수'
+        description: '기존 공개 글 회당 감사 건수'
         required: true
         default: '1'
         type: choice
@@ -26,19 +26,14 @@ on:
           - '1'
           - '2'
           - '3'
-      force_new_now:
-        description: '기존 정리 완료 후 신규 글 1건 즉시 실행'
-        required: true
-        default: false
-        type: boolean
   schedule:
-    # 한국시간 03:17, 09:17, 15:17, 21:17
-    # 기존 정리 중에는 감사→재작성→다음 빈 순번 예약을 자동 반복합니다.
-    # 기존 정리 완료 뒤 신규 글은 03:17 실행에서만 하루 1건 작성합니다.
+    # KST 03:17, 09:17, 15:17, 21:17
+    # 복구모드에서는 신규 글을 만들거나 자동 발행하지 않습니다.
+    # 기존 공개 글 감사 → 문제 글 초안 전환 → 재작성 → 사람 검수 대기만 진행합니다.
     - cron: '17 18,0,6,12 * * *'
 
 jobs:
-  master-pipeline:
+  adsense-recovery:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     permissions:
@@ -60,7 +55,7 @@ jobs:
           pip install --upgrade -r requirements.txt
           python -c "import importlib.metadata as m; print('google-genai=' + m.version('google-genai'))"
 
-      - name: Run master controller
+      - name: Run AdSense recovery controller
         env:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
@@ -76,38 +71,45 @@ jobs:
           LEGACY_TARGET_STATUS: '완료'
           LEGACY_BATCH_SIZE: ${{ github.event.inputs.legacy_batch_size || '1' }}
           FORCE_PHASE: ${{ github.event.inputs.force_phase || 'auto' }}
-          FORCE_NEW_NOW: ${{ github.event.inputs.force_new_now || 'false' }}
           MAX_LEGACY_REWRITE_ATTEMPTS: '3'
 
-          TOPIC_REFILL_THRESHOLD: '10'
-          TOPIC_REFILL_COUNT: '12'
-          NEW_WINDOW_START_HOUR: '2'
-          NEW_WINDOW_END_HOUR: '7'
-          SCHEDULE_TIMEZONE: 'Asia/Seoul'
+          # AdSense recovery safety gates
+          ADSENSE_RECOVERY_MODE: 'true'
+          MANUAL_REVIEW_REQUIRED: 'true'
+          AUTO_SCHEDULE: 'false'
+          DRAFT_ON_REVIEW_FAILURE: 'true'
 
+          SCHEDULE_TIMEZONE: 'Asia/Seoul'
           FORCE_IPV4: 'true'
           WP_CONNECT_RETRIES: '5'
           WP_CONNECT_RETRY_DELAY: '3'
           REQUEST_TIMEOUT: '45'
+
           MIN_SOURCE_COUNT: '4'
-          MIN_QUALITY_SCORE: '85'
+          MIN_QUALITY_SCORE: '88'
+          MIN_KOREAN_CHARS: '2600'
+          MIN_ENGLISH_WORDS: '950'
+          MIN_CITATION_MARKERS: '4'
           BODY_IMAGE_MAX_WIDTH: '720'
           BODY_IMAGE_MAX_HEIGHT: '520'
           ENABLE_ENGLISH: 'true'
-          AUTO_SCHEDULE: 'true'
+
           ALLOW_AI_FEATURED_IMAGE: 'true'
           PREFER_AI_FEATURED_IMAGE: 'true'
           GENERATE_AI_BODY_IMAGES: 'true'
           MIN_BODY_IMAGES: '2'
+
+          AUTO_CLEANUP_MODE: 'true'
+          AUTO_FAIL_CLOSED_DRAFT: 'true'
           QUEUE_GRADE_D_FOR_REWRITE: 'true'
           AUDIT_OUTPUT_DIR: 'audit_output'
         run: python pipeline_controller.py
 
-      - name: Upload audit reports and backups
+      - name: Upload audit/readiness reports and backups
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: taxonguru-master-${{ github.run_number }}
+          name: taxonguru-adsense-recovery-${{ github.run_number }}
           path: audit_output/
           if-no-files-found: ignore
           retention-days: 30

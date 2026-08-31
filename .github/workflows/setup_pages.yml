@@ -1,4 +1,4 @@
-name: Create Editorial Pages
+name: Create / Refresh Editorial Pages v6
 
 on:
   workflow_dispatch:
@@ -19,11 +19,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Create pages as drafts
+      - name: Publish required editorial pages
         env:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
           CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
-          SITE_PAGES_STATUS: draft
+          SITE_PAGES_STATUS: publish
+          SITE_PAGES_FORCE_UPDATE: 'true'
+          REQUEST_TIMEOUT: '45'
         run: python setup_site_pages.py
