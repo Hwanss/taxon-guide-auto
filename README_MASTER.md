@@ -1,3 +1,7 @@
+# TaxonGuru AdSense Recovery v6.2 — 자동분할 운영
+
+> 최신 운영 방식: 예약 실행마다 기본 2건씩 자동으로 나눠 감사·재작성하며, 다음 실행에서 남은 작업을 이어서 처리합니다. 사용법은 `README_V6_2_AUTO_BATCH.md`를 먼저 확인하세요.
+
 # TaxonGuru AdSense Recovery v6
 
 이 버전은 AdSense의 **"가치가 별로 없는 콘텐츠"** 재심사 전에 기존 공개 글과 사이트 신뢰 요소를 정리하기 위한 복구 모드입니다.

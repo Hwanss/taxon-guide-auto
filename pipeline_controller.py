@@ -15,7 +15,7 @@ import requests
 import urllib3.util.connection as urllib3_connection
 
 # =============================================================================
-# TaxonGuru Master Controller v6.1 · AdSense Recovery
+# TaxonGuru Master Controller v6.2 · AdSense Recovery Auto Batch
 #
 # Priority
 # 1) Sync already scheduled posts.
@@ -39,6 +39,10 @@ TIMEZONE_NAME = os.getenv("SCHEDULE_TIMEZONE", "Asia/Seoul")
 
 LEGACY_TARGET_STATUS = os.getenv("LEGACY_TARGET_STATUS", "완료").strip()
 LEGACY_BATCH_SIZE = max(1, min(10, int(os.getenv("LEGACY_BATCH_SIZE", "1"))))
+AUTO_CLEANUP_ITEMS_PER_RUN = max(1, min(6, int(os.getenv("AUTO_CLEANUP_ITEMS_PER_RUN", "2"))))
+AUTO_CLEANUP_MAX_MINUTES = max(10, min(180, int(os.getenv("AUTO_CLEANUP_MAX_MINUTES", "50"))))
+AUTO_READINESS_WHEN_CLEAN = os.getenv("AUTO_READINESS_WHEN_CLEAN", "true").lower() == "true"
+SHEET_AUTO_REPAIR = os.getenv("SHEET_AUTO_REPAIR", "true").lower() == "true"
 TOPIC_REFILL_THRESHOLD = max(0, int(os.getenv("TOPIC_REFILL_THRESHOLD", "10")))
 TOPIC_REFILL_COUNT = max(1, min(30, int(os.getenv("TOPIC_REFILL_COUNT", "12"))))
 NEW_WINDOW_START_HOUR = int(os.getenv("NEW_WINDOW_START_HOUR", "2"))
@@ -335,7 +339,7 @@ def recover_v6_quota_consumed_attempts(
         if note_idx is not None:
             cells.append(gspread.Cell(
                 row_number, note_idx + 1,
-                "v6.1 자동복구: Gemini API 429/지출한도 오류는 콘텐츠 실패가 아니므로 재작성 시도 횟수를 복원했습니다.",
+                "v6.2 자동복구: Gemini API 429/지출한도 오류는 콘텐츠 실패가 아니므로 재작성 시도 횟수를 복원했습니다.",
             ))
         if error_idx is not None:
             cells.append(gspread.Cell(row_number, error_idx + 1, ""))
@@ -343,6 +347,83 @@ def recover_v6_quota_consumed_attempts(
     if cells:
         topic_ws.update_cells(cells, value_input_option="USER_ENTERED")
     return recovered
+
+
+def repair_known_sheet_anomalies(
+    topic_ws: gspread.Worksheet,
+    headers: list[str],
+    rows: list[list[str]],
+) -> dict[str, int]:
+    """Remove known stale scalar contamination from metadata columns.
+
+    An older sheet-writing bug left the literal value ``649`` in URL/date/error
+    fields on a number of rows.  Those cells are metadata only; clearing the
+    invalid scalar is safer than treating it as a URL, date, or error message.
+    WordPress sync repopulates live URLs/status metadata where applicable.
+    """
+    if not SHEET_AUTO_REPAIR:
+        return {"rows": 0, "cells": 0}
+
+    aliases = {
+        "public_url": ["공개URL", "공개 URL"],
+        "scheduled_date": ["예약일", "예약 일시"],
+        "error": ["오류", "에러"],
+        "en_public_url": ["EN_공개URL", "영문 공개URL"],
+        "en_scheduled_date": ["EN_예약일", "영문 예약일"],
+        "en_error": ["영문오류", "EN_오류"],
+    }
+    indexes = {key: find_header(headers, names) for key, names in aliases.items()}
+    bad_scalars = {"649"}
+    cells: list[gspread.Cell] = []
+    changed_rows: set[int] = set()
+
+    for row_number, row in enumerate(rows, start=2):
+        for key, idx in indexes.items():
+            if idx is None or idx >= len(row):
+                continue
+            value = str(row[idx] or "").strip()
+            if value in bad_scalars:
+                cells.append(gspread.Cell(row_number, idx + 1, ""))
+                changed_rows.add(row_number)
+
+    if cells:
+        topic_ws.update_cells(cells, value_input_option="USER_ENTERED")
+    return {"rows": len(changed_rows), "cells": len(cells)}
+
+
+def first_rewrite_identity(
+    headers: list[str],
+    rows: list[list[str]],
+) -> tuple[int, str, str] | None:
+    status_idx = find_header(headers, ["상태"])
+    sci_idx = find_header(headers, ["학명", "학명(Scientific Name)", "학명 (Scientific Name)"])
+    attempt_idx = find_header(headers, ["재작성시도", "재작성 시도"])
+    if status_idx is None:
+        return None
+    for row_number, row in enumerate(rows, start=2):
+        status = _row_value(row, status_idx)
+        if status in LEGACY_REWRITE_STATES:
+            return (row_number, _row_value(row, sci_idx), _row_value(row, attempt_idx))
+    return None
+
+
+def adaptive_batch_target(counts: Counter[str]) -> int:
+    """Choose a conservative automatic batch size without user intervention.
+
+    The workflow normally handles two legacy items per scheduled run.  When the
+    manual-review queue is already very large, it throttles to one so the queue
+    does not grow faster than a human can inspect it.
+    """
+    target = AUTO_CLEANUP_ITEMS_PER_RUN
+    manual_waiting = count_any(counts, MANUAL_REVIEW_STATES)
+    remaining = counts.get(LEGACY_TARGET_STATUS, 0) + count_any(counts, LEGACY_REWRITE_STATES)
+    if manual_waiting >= 50:
+        target = 1
+    elif manual_waiting >= 35:
+        target = min(target, 2)
+    if remaining > 0:
+        target = min(target, remaining)
+    return max(1, target)
 
 
 def update_control(control_ws: gspread.Worksheet, **data: Any) -> None:
@@ -440,13 +521,13 @@ def process_one_legacy_rewrite(topic_ws: gspread.Worksheet, control_ws: gspread.
     update_control(
         control_ws,
         단계="기존글자동재작성",
-        결과="비공개된 기존 글 1건을 한·영으로 재작성하고 다음 빈 순번에 예약합니다.",
+        결과=("비공개된 기존 글 1건을 한·영으로 재작성하고 사람 검수용 초안으로 저장합니다." if MANUAL_REVIEW_REQUIRED else "비공개된 기존 글 1건을 한·영으로 재작성하고 다음 빈 순번에 예약합니다."),
         **summary_values(before),
         다음작업="main.py PROCESS_MODE=legacy_rewrite",
         오류="",
     )
     code = run_script(
-        "기존 비공개 글 자동 재작성·재예약",
+        "기존 비공개 글 자동 재작성·사람검수대기" if MANUAL_REVIEW_REQUIRED else "기존 비공개 글 자동 재작성·재예약",
         "main.py",
         {
             "PROCESS_MODE": "legacy_rewrite",
@@ -468,7 +549,7 @@ def process_one_legacy_rewrite(topic_ws: gspread.Worksheet, control_ws: gspread.
             오류="",
         )
         log("⏸️ Gemini API 한도/결제 제한: 콘텐츠 실패로 계산하지 않고 작업을 보류했습니다.")
-        return 0
+        return EXTERNAL_API_PAUSE_EXIT_CODE
     update_control(
         control_ws,
         단계="기존글자동재작성" if count_any(after, LEGACY_REWRITE_STATES) else "기존재작성대기열소진",
@@ -480,18 +561,175 @@ def process_one_legacy_rewrite(topic_ws: gspread.Worksheet, control_ws: gspread.
     return code
 
 
+def audit_one_legacy_post(topic_ws: gspread.Worksheet, control_ws: gspread.Worksheet) -> int:
+    _, _, counts = read_sheet(topic_ws)
+    legacy_remaining = counts.get(LEGACY_TARGET_STATUS, 0)
+    if legacy_remaining <= 0:
+        return 0
+    update_control(
+        control_ws,
+        단계="기존자료감사",
+        결과="기존 글 1건을 감사하고 유지 또는 자동 재작성 대기열로 분류합니다.",
+        **summary_values(counts),
+        다음작업="기존 글 1건 감사",
+        오류="",
+    )
+    code = run_script(
+        "기존 완료 게시물 감사·대기열 분류",
+        "audit_existing_posts.py",
+        {
+            "AUDIT_MODE": "rewrite_recent",
+            "AUDIT_BATCH_SIZE": "1",
+            "AUDIT_TARGET_STATUS": LEGACY_TARGET_STATUS,
+            "AUTO_CLEANUP_MODE": "true",
+            "AUTO_FAIL_CLOSED_DRAFT": "true",
+            "AUTO_TRASH_GRADE_D": "false",
+            "QUEUE_GRADE_D_FOR_REWRITE": "true",
+            "INCLUDE_ALREADY_AUDITED": "true",
+            "AUDIT_CREATE_ENGLISH": "false",
+            "AUDIT_DRAFT_GRADE_D": "true",
+            "AUDIT_INCLUDE_ENGLISH_POSTS": "false",
+            "FORCE_IPV4": "true",
+            "ADSENSE_RECOVERY_MODE": "true" if ADSENSE_RECOVERY_MODE else "false",
+        },
+    )
+    _, _, after = read_sheet(topic_ws)
+    if code == EXTERNAL_API_PAUSE_EXIT_CODE:
+        update_control(
+            control_ws,
+            단계="외부AI한도대기",
+            결과="Gemini API 월 지출한도/쿼터로 기존 글 감사를 변경 없이 보류했습니다.",
+            **summary_values(after),
+            다음작업="다음 자동 실행에서 재시도",
+            오류="",
+        )
+    return code
+
+
+def run_auto_cleanup_batch(topic_ws: gspread.Worksheet, control_ws: gspread.Worksheet) -> int:
+    """Process a small safe batch and automatically continue on later schedules.
+
+    One unit means either one queued rewrite, or one audit plus its immediate
+    rewrite when the audit finds a problem.  A content item that needs another
+    rewrite attempt is never retried twice in the same workflow run.
+    """
+    started = time.monotonic()
+    _, _, initial_counts = read_sheet(topic_ws)
+    target = adaptive_batch_target(initial_counts)
+    processed = 0
+    audited = 0
+    rewritten = 0
+    passed_without_rewrite = 0
+    stop_reason = "배치 목표 도달"
+
+    log(
+        f"🧹 v6.2 자동분할 정리: 이번 실행 최대 {target}건 · "
+        f"최대 {AUTO_CLEANUP_MAX_MINUTES}분 · 이후 다음 예약 실행에서 자동 계속"
+    )
+
+    while processed < target:
+        elapsed_minutes = (time.monotonic() - started) / 60.0
+        if elapsed_minutes >= AUTO_CLEANUP_MAX_MINUTES:
+            stop_reason = f"실행시간 {AUTO_CLEANUP_MAX_MINUTES}분 안전 한도 도달"
+            break
+
+        headers, rows, counts = read_sheet(topic_ws)
+        rewrite_before = first_rewrite_identity(headers, rows)
+        if rewrite_before is not None:
+            code = process_one_legacy_rewrite(topic_ws, control_ws)
+            if code == EXTERNAL_API_PAUSE_EXIT_CODE:
+                return 0
+            if code != 0:
+                return code
+            rewritten += 1
+            processed += 1
+            headers_after, rows_after, _ = read_sheet(topic_ws)
+            rewrite_after = first_rewrite_identity(headers_after, rows_after)
+            if rewrite_after is not None and rewrite_after[0] == rewrite_before[0]:
+                stop_reason = "같은 글의 추가 재작성은 다음 예약 실행으로 분산"
+                log("⏭️ 같은 글을 한 실행에서 연속 재시도하지 않고 다음 예약 실행으로 넘깁니다.")
+                break
+            continue
+
+        if counts.get(LEGACY_TARGET_STATUS, 0) <= 0:
+            stop_reason = "기존 감사 대상 소진"
+            break
+
+        before_remaining = counts.get(LEGACY_TARGET_STATUS, 0)
+        code = audit_one_legacy_post(topic_ws, control_ws)
+        if code == EXTERNAL_API_PAUSE_EXIT_CODE:
+            return 0
+        if code != 0:
+            return code
+        audited += 1
+
+        headers_after, rows_after, after = read_sheet(topic_ws)
+        after_remaining = after.get(LEGACY_TARGET_STATUS, 0)
+        if after_remaining < before_remaining and count_any(after, LEGACY_REWRITE_STATES) == 0:
+            passed_without_rewrite += 1
+            processed += 1
+            continue
+
+        rewrite_after_audit = first_rewrite_identity(headers_after, rows_after)
+        if rewrite_after_audit is not None:
+            code = process_one_legacy_rewrite(topic_ws, control_ws)
+            if code == EXTERNAL_API_PAUSE_EXIT_CODE:
+                return 0
+            if code != 0:
+                return code
+            rewritten += 1
+            processed += 1
+            headers_final, rows_final, _ = read_sheet(topic_ws)
+            still_same = first_rewrite_identity(headers_final, rows_final)
+            if still_same is not None and still_same[0] == rewrite_after_audit[0]:
+                stop_reason = "재작성 재시도는 다음 예약 실행으로 분산"
+                break
+        else:
+            processed += 1
+
+    _, _, final_counts = read_sheet(topic_ws)
+    remaining_work = final_counts.get(LEGACY_TARGET_STATUS, 0) + count_any(final_counts, LEGACY_REWRITE_STATES)
+    update_control(
+        control_ws,
+        단계="자동분할정리" if remaining_work else "기존자료자동정리완료",
+        결과=(
+            f"이번 실행 {processed}건 처리 · 감사 {audited}건 · 재작성 {rewritten}건 · "
+            f"감사통과 {passed_without_rewrite}건 · {stop_reason}"
+        ),
+        **summary_values(final_counts),
+        자동분할=f"회당 최대 {target}건 / {AUTO_CLEANUP_MAX_MINUTES}분",
+        다음작업=(
+            "다음 예약 실행에서 자동으로 이어서 정리"
+            if remaining_work
+            else "수동검수 대기 글 확인 후 자동 준비도 검사"
+        ),
+        오류="",
+    )
+    log(
+        f"✅ 자동분할 배치 종료: 처리 {processed}/{target} · 남은 기존작업 {remaining_work}건 · "
+        f"수동검수대기 {count_any(final_counts, MANUAL_REVIEW_STATES)}건"
+    )
+    return 0
+
+
 def main() -> int:
     log("=" * 76)
-    log("TaxonGuru Master v6.1: AdSense 복구 → 기존 감사 → 안전 재작성 → 사람 검수 대기")
+    log("TaxonGuru Master v6.2: AdSense 복구 · 자동분할 정리 · 사람 검수 대기")
     log(
-        f"기존 감사 대상='{LEGACY_TARGET_STATUS}' 정확히 일치 · 감사 회당 {LEGACY_BATCH_SIZE}건 · "
-        f"재작성 최대 {os.getenv('MAX_LEGACY_REWRITE_ATTEMPTS', '3')}회 · "
+        f"기존 감사 대상='{LEGACY_TARGET_STATUS}' · 자동 회당 최대 {AUTO_CLEANUP_ITEMS_PER_RUN}건 · "
+        f"최대 {AUTO_CLEANUP_MAX_MINUTES}분 · 재작성 최대 {os.getenv('MAX_LEGACY_REWRITE_ATTEMPTS', '3')}회 · "
         f"AdSense 복구={'ON' if ADSENSE_RECOVERY_MODE else 'OFF'} · 사람검수={'필수' if MANUAL_REVIEW_REQUIRED else '선택'}"
     )
     log("=" * 76)
 
     _, topic_ws, control_ws = connect_book()
     headers, rows, counts = read_sheet(topic_ws)
+
+    sheet_repair = repair_known_sheet_anomalies(topic_ws, headers, rows)
+    if sheet_repair["cells"]:
+        log(f"🧽 v6.2 시트 이상값 자동정리: {sheet_repair['rows']}행 / {sheet_repair['cells']}셀")
+        headers, rows, counts = read_sheet(topic_ws)
+
     migrated = batch_update_statuses(topic_ws, headers, rows)
     if migrated:
         log(f"🔁 기존비공개완료 {migrated}건을 자동 재작성대기/비공개보류로 전환했습니다.")
@@ -525,7 +763,7 @@ def main() -> int:
     # outage consumed the final rewrite attempt. This runs once per affected row.
     quota_recovered = recover_v6_quota_consumed_attempts(topic_ws, headers, rows)
     if quota_recovered:
-        log(f"🩹 v6.1 Gemini 한도오류 시도횟수 자동복구: {quota_recovered}건")
+        log(f"🩹 v6.2 Gemini 한도오류 시도횟수 자동복구: {quota_recovered}건")
         headers, rows, counts = read_sheet(topic_ws)
 
     # Always synchronize future→publish before deciding the next phase.
@@ -552,76 +790,54 @@ def main() -> int:
             {"FORCE_IPV4": "true", "READINESS_APPLY_SAFE_FIXES": "true"},
         )
 
-    # 1) Existing rewrite queue has absolute priority.
-    if FORCE_PHASE in {"auto", "cleanup"} and count_any(counts, LEGACY_REWRITE_STATES) > 0:
-        return process_one_legacy_rewrite(topic_ws, control_ws)
-
-    # 2) Audit recent exact-'완료' legacy posts. The audit queues B/C/D posts.
-    legacy_remaining = counts.get(LEGACY_TARGET_STATUS, 0)
-    if FORCE_PHASE == "cleanup" or (FORCE_PHASE == "auto" and legacy_remaining > 0):
-        update_control(
-            control_ws,
-            단계="기존자료감사",
-            결과="최근 기존 글을 감사하고 유지 또는 자동 재작성 대기열로 분류합니다.",
-            **summary_values(counts),
-            다음작업=f"최근 {min(LEGACY_BATCH_SIZE, legacy_remaining)}건 감사",
-            오류="",
-        )
-        code = run_script(
-            "기존 완료 게시물 감사·대기열 분류",
-            "audit_existing_posts.py",
-            {
-                "AUDIT_MODE": "rewrite_recent",
-                "AUDIT_BATCH_SIZE": str(LEGACY_BATCH_SIZE),
-                "AUDIT_TARGET_STATUS": LEGACY_TARGET_STATUS,
-                "AUTO_CLEANUP_MODE": "true",
-                "AUTO_FAIL_CLOSED_DRAFT": "true",
-                "AUTO_TRASH_GRADE_D": "false",
-                "QUEUE_GRADE_D_FOR_REWRITE": "true",
-                "INCLUDE_ALREADY_AUDITED": "true",
-                "AUDIT_CREATE_ENGLISH": "false",
-                "AUDIT_DRAFT_GRADE_D": "true",
-                "AUDIT_INCLUDE_ENGLISH_POSTS": "false",
-                "FORCE_IPV4": "true",
-                "ADSENSE_RECOVERY_MODE": "true" if ADSENSE_RECOVERY_MODE else "false",
-            },
-        )
-        _, _, after = read_sheet(topic_ws)
-        if code == EXTERNAL_API_PAUSE_EXIT_CODE:
-            update_control(
-                control_ws,
-                단계="외부AI한도대기",
-                결과="Gemini API 월 지출한도/쿼터로 기존 글 감사를 변경 없이 보류했습니다.",
-                **summary_values(after),
-                다음작업="Google AI Studio의 Spend/Billing 확인 후 다음 자동 실행에서 재시도",
-                오류="",
-            )
-            return 0
-        if code == 0 and count_any(after, LEGACY_REWRITE_STATES) > 0:
-            # Complete one full audit→rewrite cycle in the same workflow run.
-            return process_one_legacy_rewrite(topic_ws, control_ws)
-        update_control(
-            control_ws,
-            단계="기존자료감사" if after.get(LEGACY_TARGET_STATUS, 0) else "기존자료감사완료",
-            결과="정상 처리" if code == 0 else f"감사 종료코드 {code}",
-            **summary_values(after),
-            다음작업="다음 자동 실행에서 계속",
-            오류="" if code == 0 else "audit_existing_posts.py 로그 확인",
-        )
-        return code
+    # 1-2) AdSense recovery cleanup is automatically divided into small batches.
+    if FORCE_PHASE in {"auto", "cleanup"} and (
+        count_any(counts, LEGACY_REWRITE_STATES) > 0 or counts.get(LEGACY_TARGET_STATUS, 0) > 0
+    ):
+        return run_auto_cleanup_batch(topic_ws, control_ws)
 
     if FORCE_PHASE == "cleanup":
-        update_control(control_ws, 단계="기존정리완료", 결과="감사·재작성 대기 대상이 없습니다.", **summary_values(counts), 다음작업="수동검수 또는 준비도 검사", 오류="")
+        update_control(
+            control_ws,
+            단계="기존정리완료",
+            결과="감사·재작성 대기 대상이 없습니다.",
+            **summary_values(counts),
+            다음작업="수동검수 또는 자동 준비도 검사",
+            오류="",
+        )
         return 0
 
     # 3) AdSense recovery mode intentionally stops all new/automatic publication.
     if ADSENSE_RECOVERY_MODE:
+        manual_waiting = count_any(counts, MANUAL_REVIEW_STATES)
+        if AUTO_READINESS_WHEN_CLEAN and manual_waiting == 0:
+            update_control(
+                control_ws,
+                단계="애드센스자동준비도검사",
+                결과="기존 자동정리와 수동검수가 모두 끝나 자동으로 재심사 준비도를 검사합니다.",
+                **summary_values(counts),
+                다음작업="site_readiness.py 자동 실행",
+                오류="",
+            )
+            return run_script(
+                "AdSense 재심사 준비도 자동 검사",
+                "site_readiness.py",
+                {"FORCE_IPV4": "true", "READINESS_APPLY_SAFE_FIXES": "true"},
+            )
         update_control(
             control_ws,
-            단계="애드센스복구모드",
-            결과="기존 공개 글 감사가 완료되었습니다. 신규 자동발행은 중지되어 있습니다.",
+            단계="사람검수대기" if manual_waiting else "애드센스복구모드",
+            결과=(
+                f"기존 자동정리는 완료되었습니다. WordPress 초안 수동검수 {manual_waiting}건이 남아 있습니다."
+                if manual_waiting
+                else "기존 공개 글 감사가 완료되었습니다. 신규 자동발행은 중지되어 있습니다."
+            ),
             **summary_values(counts),
-            다음작업="WordPress 초안의 수동검수 → 준비도 검사(readiness) → AdSense 재검토",
+            다음작업=(
+                "WordPress 초안을 확인해 공개하면 다음 실행에서 자동 동기화합니다."
+                if manual_waiting
+                else "자동 준비도 검사"
+            ),
             오류="",
         )
         log("🛡️ AdSense 복구모드: 신규 주제 생성·자동 예약발행을 실행하지 않습니다.")
