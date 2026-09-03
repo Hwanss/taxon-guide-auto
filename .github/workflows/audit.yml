@@ -1,4 +1,4 @@
-name: TaxonGuru AdSense Recovery v6.1
+name: TaxonGuru AdSense Recovery v6.2
 
 concurrency:
   group: taxonguru-adsense-recovery
@@ -18,17 +18,19 @@ on:
           - readiness
           - status_only
       legacy_batch_size:
-        description: '기존 공개 글 회당 감사 건수'
+        description: '자동 정리 회당 최대 처리 건수'
         required: true
-        default: '1'
+        default: '2'
         type: choice
         options:
           - '1'
           - '2'
           - '3'
+          - '4'
   schedule:
     # KST 03:17, 09:17, 15:17, 21:17
     # 복구모드에서는 신규 글을 만들거나 자동 발행하지 않습니다.
+    # 한 번 실행에 2건씩 안전하게 나눠 처리하고 다음 예약 실행에서 자동으로 이어갑니다.
     # 기존 공개 글 감사 → 문제 글 초안 전환 → 재작성 → 사람 검수 대기만 진행합니다.
     - cron: '17 18,0,6,12 * * *'
 
@@ -69,7 +71,11 @@ jobs:
           SHEET_NAME: 'taxonguru'
           CONTROL_SHEET_NAME: '파이프라인상태'
           LEGACY_TARGET_STATUS: '완료'
-          LEGACY_BATCH_SIZE: ${{ github.event.inputs.legacy_batch_size || '1' }}
+          LEGACY_BATCH_SIZE: '1'
+          AUTO_CLEANUP_ITEMS_PER_RUN: ${{ github.event.inputs.legacy_batch_size || '2' }}
+          AUTO_CLEANUP_MAX_MINUTES: '50'
+          SHEET_AUTO_REPAIR: 'true'
+          AUTO_READINESS_WHEN_CLEAN: 'true'
           FORCE_PHASE: ${{ github.event.inputs.force_phase || 'auto' }}
           MAX_LEGACY_REWRITE_ATTEMPTS: '3'
 
