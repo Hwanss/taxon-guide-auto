@@ -1,0 +1,43 @@
+name: TaxonGuru Code Check
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  syntax-and-guard-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade -r requirements.txt
+
+      - name: Compile Python
+        run: |
+          python -m py_compile \
+            main.py \
+            audit_existing_posts.py \
+            pipeline_controller.py \
+            site_readiness.py \
+            adsense_public_guard.py \
+            adsense_public_guard_v63.py \
+            adsense_readiness_v63.py \
+            adsense_recovery_entrypoint.py
+
+      - name: Public Guard self-test
+        run: python adsense_public_guard_v63.py --self-test
