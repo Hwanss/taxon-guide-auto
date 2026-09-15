@@ -1,4 +1,4 @@
-name: TaxonGuru AdSense Recovery v6.2
+name: TaxonGuru AdSense Recovery v6.3
 
 concurrency:
   group: taxonguru-adsense-recovery
@@ -29,9 +29,8 @@ on:
           - '4'
   schedule:
     # KST 03:17, 09:17, 15:17, 21:17
-    # 복구모드에서는 신규 글을 만들거나 자동 발행하지 않습니다.
-    # 한 번 실행에 2건씩 안전하게 나눠 처리하고 다음 예약 실행에서 자동으로 이어갑니다.
-    # 기존 공개 글 감사 → 문제 글 초안 전환 → 재작성 → 사람 검수 대기만 진행합니다.
+    # 신규 자동발행은 중지합니다.
+    # 기존 v6.2 정리 + 공개 글 2차 하드블로커 검사 + 사람 최종검수 큐를 자동 운영합니다.
     - cron: '17 18,0,6,12 * * *'
 
 jobs:
@@ -43,10 +42,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           cache: pip
@@ -57,7 +56,7 @@ jobs:
           pip install --upgrade -r requirements.txt
           python -c "import importlib.metadata as m; print('google-genai=' + m.version('google-genai'))"
 
-      - name: Run AdSense recovery controller
+      - name: Run AdSense recovery v6.3
         env:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
@@ -75,7 +74,7 @@ jobs:
           AUTO_CLEANUP_ITEMS_PER_RUN: ${{ github.event.inputs.legacy_batch_size || '2' }}
           AUTO_CLEANUP_MAX_MINUTES: '50'
           SHEET_AUTO_REPAIR: 'true'
-          AUTO_READINESS_WHEN_CLEAN: 'true'
+          AUTO_READINESS_WHEN_CLEAN: 'false'
           FORCE_PHASE: ${{ github.event.inputs.force_phase || 'auto' }}
           MAX_LEGACY_REWRITE_ATTEMPTS: '3'
 
@@ -84,6 +83,13 @@ jobs:
           MANUAL_REVIEW_REQUIRED: 'true'
           AUTO_SCHEDULE: 'false'
           DRAFT_ON_REVIEW_FAILURE: 'true'
+
+          # v6.3 public-content guard
+          PUBLIC_GUARD_ENABLED: 'true'
+          PUBLIC_GUARD_BATCH_SIZE: '2'
+          PUBLIC_GUARD_MANUAL_QUEUE_SOFT_LIMIT: '24'
+          PUBLIC_GUARD_REQUIRE_MANUAL_CURATION: 'true'
+          PUBLIC_GUARD_DRAFT_HARD_BLOCKERS: 'true'
 
           SCHEDULE_TIMEZONE: 'Asia/Seoul'
           FORCE_IPV4: 'true'
@@ -109,7 +115,7 @@ jobs:
           AUTO_FAIL_CLOSED_DRAFT: 'true'
           QUEUE_GRADE_D_FOR_REWRITE: 'true'
           AUDIT_OUTPUT_DIR: 'audit_output'
-        run: python pipeline_controller.py
+        run: python adsense_recovery_entrypoint.py
 
       - name: Upload audit/readiness reports and backups
         if: always()
