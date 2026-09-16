@@ -1,4 +1,4 @@
-name: TaxonGuru AdSense Recovery v6.3
+name: TaxonGuru AdSense Recovery v6.4
 
 concurrency:
   group: taxonguru-adsense-recovery
@@ -15,6 +15,7 @@ on:
         options:
           - auto
           - cleanup
+          - auto_publish
           - readiness
           - status_only
       legacy_batch_size:
@@ -29,8 +30,7 @@ on:
           - '4'
   schedule:
     # KST 03:17, 09:17, 15:17, 21:17
-    # 신규 자동발행은 중지합니다.
-    # 기존 v6.2 정리 + 공개 글 2차 하드블로커 검사 + 사람 최종검수 큐를 자동 운영합니다.
+    # 기존 글 정리 → 공개 글 하드블로커 검사 → v6.4 엄격 자동 최종검수/조건부 공개 → 준비도 스냅샷
     - cron: '17 18,0,6,12 * * *'
 
 jobs:
@@ -56,7 +56,7 @@ jobs:
           pip install --upgrade -r requirements.txt
           python -c "import importlib.metadata as m; print('google-genai=' + m.version('google-genai'))"
 
-      - name: Run AdSense recovery v6.3
+      - name: Run AdSense recovery v6.4
         env:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
@@ -84,12 +84,27 @@ jobs:
           AUTO_SCHEDULE: 'false'
           DRAFT_ON_REVIEW_FAILURE: 'true'
 
-          # v6.3 public-content guard
+          # v6.3 public-content guard: hard blockers only.
+          # Clean posts are finalized by the stricter v6.4 gate instead of being re-queued forever.
           PUBLIC_GUARD_ENABLED: 'true'
           PUBLIC_GUARD_BATCH_SIZE: '2'
           PUBLIC_GUARD_MANUAL_QUEUE_SOFT_LIMIT: '24'
-          PUBLIC_GUARD_REQUIRE_MANUAL_CURATION: 'true'
+          PUBLIC_GUARD_REQUIRE_MANUAL_CURATION: 'false'
           PUBLIC_GUARD_DRAFT_HARD_BLOCKERS: 'true'
+
+          # v6.4 strict conditional auto-publish
+          AUTO_PUBLISH_ENABLED: 'true'
+          AUTO_PUBLISH_DRY_RUN: 'false'
+          AUTO_PUBLISH_BATCH_SIZE: '4'
+          AUTO_PUBLISH_MIN_KO_SCORE: '98'
+          AUTO_PUBLISH_MIN_EN_SCORE: '96'
+          AUTO_PUBLISH_MIN_SOURCES: '4'
+          AUTO_PUBLISH_MIN_KO_CHARS: '2600'
+          AUTO_PUBLISH_MIN_EN_WORDS: '950'
+          AUTO_PUBLISH_REQUIRE_IMAGES: 'true'
+          AUTO_PUBLISH_CHECK_SOURCE_LINKS: 'true'
+          AUTO_PUBLISH_ROLLBACK_ON_RENDER_FAILURE: 'true'
+          AUTO_REWRITE_FAILED_LEGACY: 'true'
 
           SCHEDULE_TIMEZONE: 'Asia/Seoul'
           FORCE_IPV4: 'true'
