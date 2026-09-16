@@ -21,7 +21,7 @@ def main() -> int:
         return run("파이프라인 상태 확인", "pipeline_controller.py")
 
     if phase == "auto_publish":
-        return run("v6.4 엄격 자동 최종검수/조건부 공개", "adsense_auto_publish_v64.py")
+        return run("v6.4.1 엄격 자동 최종검수/조건부 공개", "adsense_auto_publish_v641.py")
 
     code = run("기존 AdSense 복구 파이프라인", "pipeline_controller.py")
     if code != 0:
@@ -34,7 +34,7 @@ def main() -> int:
     if guard_code != 0:
         return guard_code
 
-    auto_publish_code = run("v6.4 엄격 자동 최종검수/조건부 공개", "adsense_auto_publish_v64.py")
+    auto_publish_code = run("v6.4.1 엄격 자동 최종검수/조건부 공개", "adsense_auto_publish_v641.py")
     if auto_publish_code != 0:
         return auto_publish_code
 
