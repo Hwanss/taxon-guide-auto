@@ -1,4 +1,4 @@
-name: TaxonGuru AdSense Recovery v6.4
+name: TaxonGuru AdSense Recovery v6.4.2
 
 concurrency:
   group: taxonguru-adsense-recovery
@@ -29,9 +29,10 @@ on:
           - '3'
           - '4'
   schedule:
-    # KST 03:17, 09:17, 15:17, 21:17
-    # 기존 글 정리 → 공개 글 하드블로커 검사 → v6.4 엄격 자동 최종검수/조건부 공개 → 준비도 스냅샷
-    - cron: '17 18,0,6,12 * * *'
+    # KST 09:17 once daily.
+    # Gemini/OpenAI 비용·한도 낭비를 막기 위해 복구 예약 실행은 1일 1회만 수행합니다.
+    # 필요 시 workflow_dispatch로 cleanup/readiness/status_only를 수동 실행할 수 있습니다.
+    - cron: '17 0 * * *'
 
 jobs:
   adsense-recovery:
@@ -56,7 +57,7 @@ jobs:
           pip install --upgrade -r requirements.txt
           python -c "import importlib.metadata as m; print('google-genai=' + m.version('google-genai'))"
 
-      - name: Run AdSense recovery v6.4
+      - name: Run AdSense recovery v6.4.2
         env:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
