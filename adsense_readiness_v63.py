@@ -25,6 +25,7 @@ from adsense_public_guard_v63 import (
     classify_post,
     fetch_published_posts,
     find_header,
+    guard_status_requires_confirmation,
     row_value,
 )
 
@@ -93,7 +94,12 @@ def write_readiness_sheet(report: dict[str, Any]) -> None:
         rows: list[list[str]] = [
             ["항목", "값", "판정", "설명"],
             ["최근검사", report["checked_at_utc"], "", ""],
-            ["최종판정", report["verdict"], report["verdict"], "READY일 때만 재심사 권장"],
+            [
+                "최종판정",
+                report["verdict"],
+                report["verdict"],
+                "READY는 공개 사이트 하드블로커/미확인 공개행 기준. 비공개 내부 대기열은 경고로 관리",
+            ],
             ["공개글수", str(report["published_posts"]["count"]), "", ""],
             ["공개글하드블로커", str(report["published_posts"]["hard_blocker_posts"]), "", ""],
             ["수동검수대기", str(report["sheet"]["manual_review_waiting"]), "", ""],
@@ -203,10 +209,17 @@ def main() -> int:
         "기존정리오류",
     }
     cleanup_waiting = sum(status_counts.get(s, 0) for s in cleanup_states)
+    # Internal draft/rewrite backlog is operational work, not a public-site
+    # blocker by itself. Any queued row that is still publicly visible is
+    # caught separately by published_guard_unconfirmed below.
     if manual_waiting:
-        critical.append(f"사람 최종 검수 대기: {manual_waiting}건")
+        warnings.append(
+            f"내부 사람 최종 검수 대기: {manual_waiting}건 (비공개 대기열은 READY 차단 안 함)"
+        )
     if cleanup_waiting:
-        critical.append(f"기존 글 정리/재작성 대기: {cleanup_waiting}건")
+        warnings.append(
+            f"내부 기존 글 정리/재작성 대기: {cleanup_waiting}건 (비공개 대기열은 READY 차단 안 함)"
+        )
 
     guard_status_idx = find_header(headers, [GUARD_STATUS_HEADER])
     post_id_idx = find_header(headers, ["WP_POST_ID", "WP POST ID"])
@@ -222,7 +235,7 @@ def main() -> int:
         if not ids or not any(item_id in posts for item_id in ids):
             continue
         guard_status = row_value(row, guard_status_idx)
-        if guard_status in {GUARD_REWRITE_REQUIRED, GUARD_MANUAL_REQUIRED, ""}:
+        if guard_status_requires_confirmation(guard_status):
             published_guard_unconfirmed += 1
     if published_guard_unconfirmed:
         critical.append(
