@@ -157,6 +157,15 @@ def row_value(row: list[str], idx: int | None) -> str:
     return str(row[idx]).strip()
 
 
+def guard_status_requires_confirmation(value: str) -> bool:
+    """Return True when a public row has not completed the Public Guard gate."""
+    return str(value or "").strip() in {
+        GUARD_REWRITE_REQUIRED,
+        GUARD_MANUAL_REQUIRED,
+        "",
+    }
+
+
 def text_only(value: str) -> str:
     value = re.sub(r"<script.*?</script>|<style.*?</style>", " ", value or "", flags=re.I | re.S)
     value = re.sub(r"<[^>]+>", " ", value)
@@ -446,20 +455,115 @@ def run_guard() -> int:
     rewrites_queued = 0
     reviews_queued = 0
     confirmed = 0
-    unmatched_public_ids = set(posts)
+    safety_rows = 0
+    safety_drafted_posts = 0
 
+    # v6.4.2 public-safety reconciliation.
+    # A row that is already queued for rewrite/manual review must not stay public,
+    # and any currently public hard blocker is drafted immediately regardless of
+    # the row's legacy status. This prevents "Guard 0 / Readiness 1" drift.
+    for row in rows:
+        published_ids = [
+            post_id
+            for post_id in (row.post_id, row.en_post_id)
+            if post_id and post_id in posts
+        ]
+        if not published_ids:
+            continue
+
+        checks, hard_reasons = inspect_row_posts(row, posts)
+        pending_private = row.status in MANUAL_REVIEW_STATES or row.status in REWRITE_STATES
+        if not hard_reasons and not pending_private:
+            continue
+
+        drafted = set_posts_draft(row, posts)
+        if not drafted:
+            continue
+
+        fields: dict[str, Any] = {"error": ""}
+        if hard_reasons:
+            fields.update(
+                {
+                    "guard_reason": " | ".join(hard_reasons)[:1800],
+                    "cleanup_note": (
+                        "Public Guard v6.4.2: 공개 하드 블로커 감지 → "
+                        "즉시 비공개 후 재검수"
+                    ),
+                }
+            )
+            if row.scientific_name:
+                fields.update(
+                    {
+                        "status": "기존재작성대기",
+                        "guard_status": GUARD_REWRITE_REQUIRED,
+                    }
+                )
+            else:
+                fields.update(
+                    {
+                        "status": "기존수동검수대기",
+                        "guard_status": GUARD_MANUAL_REQUIRED,
+                    }
+                )
+        elif row.status in REWRITE_STATES:
+            fields.update(
+                {
+                    "guard_status": GUARD_REWRITE_REQUIRED,
+                    "guard_reason": row.guard_reason
+                    or "재작성 대기 행이 공개 상태여서 안전 비공개 처리했습니다.",
+                }
+            )
+        else:
+            fields.update(
+                {
+                    "guard_status": GUARD_MANUAL_REQUIRED,
+                    "guard_reason": row.guard_reason
+                    or "사람 검수 대기 행이 공개 상태여서 안전 비공개 처리했습니다.",
+                }
+            )
+
+        update_row(ws, headers, row.row_number, fields)
+        safety_rows += 1
+        safety_drafted_posts += len(drafted)
+        report_rows.append(
+            {
+                "row": row.row_number,
+                "status": row.status,
+                "post_id": row.post_id,
+                "en_post_id": row.en_post_id,
+                "action": f"공개안전차단 / draft={','.join(map(str, drafted))}",
+                "hard_blockers": " | ".join(hard_reasons),
+                "warnings": "",
+                "note": row.scientific_name,
+            }
+        )
+
+    # Re-fetch after safety drafting so every later count uses the real public set.
+    headers, rows = load_rows(ws)
+    posts = fetch_published_posts()
+    unmatched_public_ids = set(posts)
     for row in rows:
         if row.post_id:
             unmatched_public_ids.discard(row.post_id)
         if row.en_post_id:
             unmatched_public_ids.discard(row.en_post_id)
 
+    # Clean public rows that were waiting on the old Guard flag can be confirmed
+    # automatically when manual curation is disabled. Auto-publish statuses are
+    # intentionally left untouched.
     for row in rows:
-        if row.guard_status not in {GUARD_REWRITE_REQUIRED, GUARD_MANUAL_REQUIRED}:
-            continue
         if row.status in MANUAL_REVIEW_STATES or row.status in REWRITE_STATES:
             continue
-        if not expected_published(row, posts):
+        if row.guard_status == GUARD_CONFIRMED:
+            continue
+        auto_confirm_allowed = row.guard_status in {
+            GUARD_REWRITE_REQUIRED,
+            GUARD_MANUAL_REQUIRED,
+        } or (
+            not REQUIRE_MANUAL_CURATION
+            and guard_status_requires_confirmation(row.guard_status)
+        )
+        if not auto_confirm_allowed or not expected_published(row, posts):
             continue
         checks, hard_reasons = inspect_row_posts(row, posts)
         if hard_reasons:
@@ -470,7 +574,10 @@ def run_guard() -> int:
             row.row_number,
             {
                 "guard_status": GUARD_CONFIRMED,
-                "guard_reason": "Public Guard 대기 이후 WordPress 공개 상태를 확인했습니다. 현재 하드 블로커 없음.",
+                "guard_reason": (
+                    "Public Guard v6.4.2: WordPress 공개 상태 재확인 완료. "
+                    "현재 하드 블로커 없음."
+                ),
                 "error": "",
             },
         )
@@ -589,19 +696,25 @@ def run_guard() -> int:
                 }
             )
 
-    remaining_hard = 0
-    remaining_unreviewed_clean = 0
     headers_after, rows_after = load_rows(ws)
     posts_after = fetch_published_posts()
+
+    # Count actual public posts with the exact same classifier used by Readiness.
+    remaining_hard = sum(
+        1 for post in posts_after.values() if classify_post(post).hard_blockers
+    )
+
+    # Count any public sheet row whose Guard state is still incomplete.
+    # This intentionally mirrors adsense_readiness_v63.py.
+    remaining_unreviewed_clean = 0
+    unmatched_public_ids = set(posts_after)
     for row in rows_after:
-        if should_skip_row(row) or row.guard_status == GUARD_CONFIRMED:
-            continue
-        checks, hard_reasons = inspect_row_posts(row, posts_after)
-        if not checks:
-            continue
-        if hard_reasons:
-            remaining_hard += 1
-        elif REQUIRE_MANUAL_CURATION:
+        linked_public = False
+        for post_id in (row.post_id, row.en_post_id):
+            if post_id and post_id in posts_after:
+                linked_public = True
+                unmatched_public_ids.discard(post_id)
+        if linked_public and guard_status_requires_confirmation(row.guard_status):
             remaining_unreviewed_clean += 1
 
     report = {
@@ -614,6 +727,8 @@ def run_guard() -> int:
         "rewrites_queued": rewrites_queued,
         "manual_reviews_queued": reviews_queued,
         "manual_reviews_confirmed": confirmed,
+        "safety_reconciled_rows": safety_rows,
+        "safety_drafted_posts": safety_drafted_posts,
         "remaining_public_hard_blocker_rows": remaining_hard,
         "remaining_public_unreviewed_clean_rows": remaining_unreviewed_clean,
         "unmatched_public_post_ids": sorted(unmatched_public_ids),
@@ -641,9 +756,10 @@ def run_guard() -> int:
         writer.writerows(report_rows)
 
     log(
-        "🛡️ Public Guard v6.3: "
+        "🛡️ Public Guard v6.4.2: "
         f"재작성대기 {rewrites_queued} · 사람검수대기 {reviews_queued} · "
-        f"사람검수확인 {confirmed} · 남은 공개 하드블로커 {remaining_hard} · "
+        f"사람검수확인 {confirmed} · 안전비공개 {safety_drafted_posts} · "
+        f"남은 공개 하드블로커 {remaining_hard} · "
         f"남은 미검수 공개글 {remaining_unreviewed_clean}"
     )
     if unmatched_public_ids:
