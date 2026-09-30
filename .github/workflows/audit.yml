@@ -5,6 +5,14 @@ concurrency:
   cancel-in-progress: false
 
 on:
+  # Fallback manual trigger: updating .github/recovery-run.trigger starts the
+  # latest main-branch Recovery even when GitHub's scheduled queue is delayed.
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/recovery-run.trigger'
+
   workflow_dispatch:
     inputs:
       force_phase:
