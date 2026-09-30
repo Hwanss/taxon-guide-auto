@@ -5,13 +5,13 @@ concurrency:
   cancel-in-progress: false
 
 on:
-  # Fallback manual trigger: updating .github/recovery-run.trigger starts the
+  # Fallback manual trigger: updating CHANGELOG_ADSENSE_v6_4.md starts the
   # latest main-branch Recovery even when GitHub's scheduled queue is delayed.
   push:
     branches:
       - main
     paths:
-      - '.github/recovery-run.trigger'
+      - 'CHANGELOG_ADSENSE_v6_4.md'
 
   workflow_dispatch:
     inputs:
