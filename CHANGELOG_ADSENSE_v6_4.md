@@ -8,3 +8,5 @@
 - AdSense 재심사 준비도 판단은 기존 v6.3 strict gate 유지
 
 - 2026-09-30: v6.4.2 scheduled-run delay fallback trigger enabled; manual verification run requested.
+
+- 2026-10-04: v6.4.3 WordPress timeout recovery + fail-safe Guard/Readiness verification run.
