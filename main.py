@@ -75,6 +75,12 @@ if ADSENSE_RECOVERY_MODE:
 DRAFT_ON_REVIEW_FAILURE = os.getenv("DRAFT_ON_REVIEW_FAILURE", "true").lower() == "true"
 DRAFT_STATUS = os.getenv("WP_DRAFT_STATUS", "draft")
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "45"))
+WP_CONNECT_RETRIES = max(1, int(os.getenv("WP_CONNECT_RETRIES", "3")))
+WP_CONNECT_RETRY_DELAY = max(0.5, float(os.getenv("WP_CONNECT_RETRY_DELAY", "2")))
+WP_WRITE_READ_TIMEOUT = max(
+    REQUEST_TIMEOUT,
+    int(os.getenv("WP_WRITE_READ_TIMEOUT", "90")),
+)
 FORCE_IPV4 = os.getenv("FORCE_IPV4", "true").lower() == "true"
 if FORCE_IPV4:
     urllib3_connection.HAS_IPV6 = False
@@ -816,32 +822,82 @@ def choose_sheet_item(worksheet: gspread.Worksheet, headers: list[str]) -> Sheet
 # -----------------------------------------------------------------------------
 # WordPress REST API
 # -----------------------------------------------------------------------------
-def wp_request(method: str, endpoint: str, **kwargs: Any) -> requests.Response:
-    url = f"{WP_URL}/{endpoint.lstrip('/')}"
-    response = session.request(
-        method,
-        url,
-        auth=wp_auth,
-        timeout=REQUEST_TIMEOUT,
-        **kwargs,
+def _wp_retryable_write(method: str, endpoint: str) -> bool:
+    """Retry only idempotent-ish WordPress writes to an existing numeric resource."""
+    if method.upper() not in {"POST", "PUT", "PATCH"}:
+        return False
+    clean = endpoint.strip("/")
+    return bool(re.fullmatch(r"(?:posts|media|pages)/\d+", clean))
+
+
+def _wp_request(
+    base_url: str,
+    method: str,
+    endpoint: str,
+    **kwargs: Any,
+) -> requests.Response:
+    clean_endpoint = endpoint.lstrip("/")
+    url = f"{base_url}/{clean_endpoint}"
+    method_upper = method.upper()
+    retryable = method_upper in {"GET", "HEAD"} or _wp_retryable_write(method_upper, clean_endpoint)
+    attempts = WP_CONNECT_RETRIES if retryable else 1
+    timeout = kwargs.pop(
+        "timeout",
+        (REQUEST_TIMEOUT, WP_WRITE_READ_TIMEOUT)
+        if method_upper in {"POST", "PUT", "PATCH"}
+        else REQUEST_TIMEOUT,
     )
-    if response.status_code >= 400:
-        raise RuntimeError(f"WordPress {method} {endpoint} 실패 ({response.status_code}): {response.text[:500]}")
-    return response
+
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            response = session.request(
+                method_upper,
+                url,
+                auth=wp_auth,
+                timeout=timeout,
+                **kwargs,
+            )
+            if response.status_code >= 400:
+                # Retry only transient server/rate-limit responses. Do not retry
+                # validation/authentication errors that need operator action.
+                if retryable and response.status_code in {408, 429, 500, 502, 503, 504} and attempt < attempts:
+                    delay = WP_CONNECT_RETRY_DELAY * attempt
+                    log(
+                        f"  ⚠️ WordPress {method_upper} {clean_endpoint} HTTP "
+                        f"{response.status_code} → {delay:.1f}초 후 재시도 "
+                        f"({attempt}/{attempts})"
+                    )
+                    time.sleep(delay)
+                    continue
+                raise RuntimeError(
+                    f"WordPress {method_upper} {clean_endpoint} 실패 "
+                    f"({response.status_code}): {response.text[:500]}"
+                )
+            return response
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            last_error = exc
+            if not retryable or attempt >= attempts:
+                raise
+            delay = WP_CONNECT_RETRY_DELAY * attempt
+            log(
+                f"  ⚠️ WordPress {method_upper} {clean_endpoint} "
+                f"{type(exc).__name__} → {delay:.1f}초 후 재시도 "
+                f"({attempt}/{attempts})"
+            )
+            time.sleep(delay)
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError(f"WordPress {method_upper} {clean_endpoint} 요청 실패")
+
+
+def wp_request(method: str, endpoint: str, **kwargs: Any) -> requests.Response:
+    return _wp_request(WP_URL, method, endpoint, **kwargs)
 
 
 def wp_root_request(method: str, endpoint: str, **kwargs: Any) -> requests.Response:
-    url = f"{WP_SITE_URL}/wp-json/{endpoint.lstrip('/')}"
-    response = session.request(
-        method,
-        url,
-        auth=wp_auth,
-        timeout=REQUEST_TIMEOUT,
-        **kwargs,
-    )
-    if response.status_code >= 400:
-        raise RuntimeError(f"WordPress {method} {endpoint} 실패 ({response.status_code}): {response.text[:500]}")
-    return response
+    return _wp_request(f"{WP_SITE_URL}/wp-json", method, endpoint, **kwargs)
 
 
 def _bridge_request(
