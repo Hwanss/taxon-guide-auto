@@ -1,4 +1,4 @@
-name: TaxonGuru AdSense Recovery v6.4.2
+name: TaxonGuru AdSense Recovery v6.4.3
 
 concurrency:
   group: taxonguru-adsense-recovery
@@ -65,7 +65,7 @@ jobs:
           pip install --upgrade -r requirements.txt
           python -c "import importlib.metadata as m; print('google-genai=' + m.version('google-genai'))"
 
-      - name: Run AdSense recovery v6.4.2
+      - name: Run AdSense recovery v6.4.3
         env:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
@@ -119,6 +119,7 @@ jobs:
           FORCE_IPV4: 'true'
           WP_CONNECT_RETRIES: '5'
           WP_CONNECT_RETRY_DELAY: '3'
+          WP_WRITE_READ_TIMEOUT: '90'
           REQUEST_TIMEOUT: '45'
 
           MIN_SOURCE_COUNT: '4'
