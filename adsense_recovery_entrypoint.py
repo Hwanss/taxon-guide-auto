@@ -23,29 +23,46 @@ def main() -> int:
     if phase == "auto_publish":
         return run("v6.4.1 엄격 자동 최종검수/조건부 공개", "adsense_auto_publish_v641.py")
 
-    code = run("기존 AdSense 복구 파이프라인", "pipeline_controller.py")
-    if code != 0:
-        return code
+    pipeline_code = run("기존 AdSense 복구 파이프라인", "pipeline_controller.py")
 
     if phase not in {"auto", "cleanup"}:
-        return 0
+        return pipeline_code
+
+    # v6.4.3 fail-safe: a transient content-processing failure must not prevent
+    # Public Guard / Readiness from checking the live public site.
+    if pipeline_code != 0:
+        print(
+            "⚠️ 콘텐츠 복구 파이프라인이 실패했지만 공개 사이트 안전검사를 계속합니다.",
+            flush=True,
+        )
 
     guard_code = run("공개 글 AdSense 하드블로커 가드", "adsense_public_guard_v63.py")
-    if guard_code != 0:
-        return guard_code
 
-    auto_publish_code = run("v6.4.1 엄격 자동 최종검수/조건부 공개", "adsense_auto_publish_v641.py")
-    if auto_publish_code != 0:
-        return auto_publish_code
+    auto_publish_code = 0
+    if pipeline_code == 0 and guard_code == 0:
+        auto_publish_code = run(
+            "v6.4.1 엄격 자동 최종검수/조건부 공개",
+            "adsense_auto_publish_v641.py",
+        )
+    else:
+        print(
+            "⏭️ 선행 단계 오류가 있어 이번 실행의 자동공개 단계는 건너뜁니다.",
+            flush=True,
+        )
 
-    # 항상 최신 준비도 보고서를 만들되, 일반 예약 정리 중에는 NOT READY여도 실패 처리하지 않습니다.
+    # Readiness is always executed last, even if cleanup/WordPress work failed.
     report_code = run("AdSense 준비도 스냅샷", "adsense_readiness_v63.py")
     if report_code != 0:
         print(
-            "⚠️ 준비도 스냅샷은 NOT READY입니다. 자동 정리 중에는 정상일 수 있으며 "
-            "최종 재심사 직전에는 force_phase=readiness로 엄격 검사합니다.",
+            "⚠️ 준비도 스냅샷 검사 자체에 오류가 있거나 NOT READY 상태입니다.",
             flush=True,
         )
+
+    # Preserve failure visibility in GitHub Actions while still producing the
+    # public-safety/readiness reports needed during AdSense review.
+    for code in (pipeline_code, guard_code, auto_publish_code, report_code):
+        if code != 0:
+            return code
     return 0
 
 
