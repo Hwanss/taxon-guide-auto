@@ -58,28 +58,43 @@ def main():
         for item in menus
     ]
     items_by_slug = {}
-    locs = locations.values() if isinstance(locations, dict) else locations
-    for loc in locs:
-        if not isinstance(loc, dict):
-            continue
-        slug = str(loc.get("slug") or "")
-        if slug:
-            items_by_slug[slug] = loc
+    if isinstance(locations, dict):
+        items_by_slug = {
+            slug: loc for slug, loc in locations.items() if isinstance(loc, dict)
+        }
+    else:
+        items_by_slug = {
+            str(loc.get("slug", "")): loc
+            for loc in locations
+            if isinstance(loc, dict) and loc.get("slug")
+        }
 
-    # Prefer a footer menu. If the theme has no footer location, use its primary menu.
-    target_slug = next((k for k in items_by_slug if "footer" in k.lower()), None)
-    target_slug = target_slug or next((k for k in items_by_slug if "primary" in k.lower() or "main" in k.lower()), None)
+    # Primary menu is deliberately preferred: trust links must be visible in main navigation.
+    target_slug = next(
+        (slug for slug, loc in items_by_slug.items()
+         if "primary" in str(loc.get("description", "")).lower()
+         or "primary" in slug.lower() or "menu-1" == slug.lower()), None
+    )
+    target_slug = target_slug or next((k for k in items_by_slug if "footer" in k.lower()), None)
     if not target_slug:
         report["issues"].append("WordPress 테마에서 footer/primary 메뉴 위치를 확인하지 못했습니다.")
     else:
         report["target_location"] = target_slug
         target = items_by_slug[target_slug]
         menu_id = int(target.get("menu") or 0)
+        needs_assignment = False
+        if menu_id <= 0 and len(menus) == 1:
+            candidate = menus[0]
+            if not candidate.get("locations"):
+                # Reuse the only existing unassigned menu. Never replace an active menu.
+                menu_id = int(candidate["id"])
+                needs_assignment = True
         if menu_id <= 0:
             report["issues"].append(
-                "대상 메뉴 위치에 연결된 메뉴가 없습니다. 원본 메뉴 손상 방지를 위해 자동 신규 메뉴는 생성하지 않습니다.")
+                "기존 메뉴가 없거나 여러 개여서 자동 할당할 수 없습니다. 기존 메뉴를 보존합니다.")
         else:
             report["target_menu_id"] = menu_id
+            report["needs_assignment"] = needs_assignment
             existing = []
             page = 1
             while True:
@@ -110,6 +125,13 @@ def main():
                     report["changed"].append({"title": title, "url": url, "item_id": posted.get("id")})
                 else:
                     report["changed"].append({"title": title, "url": url, "action": "would_add"})
+            # Only assign the menu after all five links have been successfully created.
+            if needs_assignment:
+                if APPLY:
+                    req("POST", f"menus/{menu_id}", json={"locations": [target_slug]})
+                    report["assigned_location"] = target_slug
+                else:
+                    report["assignment_preview"] = f"Would assign existing menu {menu_id} to {target_slug}"
     output = OUTPUT / "site_navigation_repair.json"
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))
