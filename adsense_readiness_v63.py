@@ -115,6 +115,13 @@ def write_readiness_sheet(report: dict[str, Any]) -> None:
             ["홈신뢰링크부족", ", ".join(report["homepage"]["missing_trust_links"]), "", ""],
             ["ads.txt", str(report["ads_txt"]["ok"]), "", report["ads_txt"].get("detail", "")],
         ]
+        for item in report["published_posts"]["social_reference_posts"]:
+            rows.append([
+                "CONTENT_REVIEW",
+                item["url"],
+                "출처검증필요",
+                "SNS 참고자료: " + ", ".join(item["hosts"]),
+            ])
         for issue in report["critical_issues"]:
             rows.append(["CRITICAL", issue, "수정필요", ""])
         for warning in report["warnings"]:
