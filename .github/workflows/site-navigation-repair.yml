@@ -30,7 +30,7 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          NAV_APPLY: 'true'
+          NAV_APPLY: 'false'
           AUDIT_OUTPUT_DIR: audit_output
         run: python site_navigation_repair.py
       - name: Preserve menu backup and outcome
