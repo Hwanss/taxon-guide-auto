@@ -1,0 +1,42 @@
+name: TaxonGuru Site Navigation Repair (One Time)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'SITE_NAV_FIX_TRIGGER.md'
+
+jobs:
+  site-navigation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install requests
+        run: pip install requests
+      - name: Verify syntax
+        run: python -m py_compile site_navigation_repair.py
+      - name: Inspect or safely update existing WordPress menu
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          NAV_APPLY: 'false'
+          AUDIT_OUTPUT_DIR: audit_output
+        run: python site_navigation_repair.py
+      - name: Preserve menu backup and outcome
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-navigation-report-${{ github.run_number }}
+          path: audit_output/
+          if-no-files-found: ignore
