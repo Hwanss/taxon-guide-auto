@@ -13,6 +13,7 @@ def run(label: str, script: str, *args: str) -> int:
 
 def main() -> int:
     phase = os.getenv("FORCE_PHASE", "auto").strip().lower()
+    editorial_freeze = os.getenv("ADSENSE_EDITORIAL_FREEZE", "false").lower() == "true"
 
     if phase == "readiness":
         return run("AdSense 최종 준비도 검사", "adsense_readiness_v63.py", "--strict")
@@ -21,9 +22,16 @@ def main() -> int:
         return run("파이프라인 상태 확인", "pipeline_controller.py")
 
     if phase == "auto_publish":
+        if editorial_freeze:
+            print("⏸️ AdSense 재심사 전 편집 검수 동결: 자동공개 금지", flush=True)
+            return 0
         return run("v6.4.1 엄격 자동 최종검수/조건부 공개", "adsense_auto_publish_v641.py")
 
-    pipeline_code = run("기존 AdSense 복구 파이프라인", "pipeline_controller.py")
+    if editorial_freeze and phase in {"auto", "cleanup"}:
+        print("⏸️ 편집 검수 동결: 자동 생성·재작성·공개를 중단하고 공개 사이트 검사만 수행합니다.", flush=True)
+        pipeline_code = 0
+    else:
+        pipeline_code = run("기존 AdSense 복구 파이프라인", "pipeline_controller.py")
 
     if phase not in {"auto", "cleanup"}:
         return pipeline_code
@@ -39,7 +47,7 @@ def main() -> int:
     guard_code = run("공개 글 AdSense 하드블로커 가드", "adsense_public_guard_v63.py")
 
     auto_publish_code = 0
-    if pipeline_code == 0 and guard_code == 0:
+    if pipeline_code == 0 and guard_code == 0 and not editorial_freeze:
         auto_publish_code = run(
             "v6.4.1 엄격 자동 최종검수/조건부 공개",
             "adsense_auto_publish_v641.py",
