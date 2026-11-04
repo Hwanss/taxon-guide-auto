@@ -7,6 +7,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit
 
 import gspread
 import requests
@@ -31,6 +32,9 @@ from adsense_public_guard_v63 import (
 
 GOOGLE_CREDENTIALS = os.environ.get("GOOGLE_CREDENTIALS", "")
 STRICT = "--strict" in sys.argv
+# The automated public-site checklist is NOT a substitute for an editor's review.
+EDITORIAL_SIGNOFF = os.getenv("ADSENSE_EDITORIAL_SIGNOFF", "false").lower() == "true"
+SOCIAL_REFERENCE_HOSTS = {"facebook.com", "instagram.com", "tiktok.com", "reddit.com", "pinterest.com"}
 
 REQUIRED_PAGES = [
     ("about-taxonguru", "TaxonGuru 소개"),
@@ -98,10 +102,12 @@ def write_readiness_sheet(report: dict[str, Any]) -> None:
                 "최종판정",
                 report["verdict"],
                 report["verdict"],
-                "READY는 공개 사이트 하드블로커/미확인 공개행 기준. 비공개 내부 대기열은 경고로 관리",
+                "내부 재신청 준비도 점검입니다. Google AdSense 승인 보장이 아니며, 수동 편집 검수가 필요합니다.",
             ],
             ["공개글수", str(report["published_posts"]["count"]), "", ""],
             ["공개글하드블로커", str(report["published_posts"]["hard_blocker_posts"]), "", ""],
+            ["SNS참고자료포함글", str(len(report["published_posts"]["social_reference_posts"])), "", ""],
+            ["편집자실사승인", str(report["editorial_signoff"]), "", "사람이 직접 검토한 뒤 승인; 자동 점수로 대체하지 않음"],
             ["수동검수대기", str(report["sheet"]["manual_review_waiting"]), "", ""],
             ["재작성/정리대기", str(report["sheet"]["cleanup_waiting"]), "", ""],
             ["PublicGuard미확인공개글", str(report["sheet"]["published_guard_unconfirmed"]), "", ""],
@@ -117,6 +123,22 @@ def write_readiness_sheet(report: dict[str, Any]) -> None:
         ws.update(values=rows, range_name="A1", value_input_option="USER_ENTERED")
     except Exception as exc:
         log(f"⚠️ AdSense준비도 시트 갱신 실패: {' '.join(str(exc).split())[:300]}")
+
+
+def social_hosts_in_references(post: dict[str, Any]) -> list[str]:
+    """Report social-media URLs used as article references, not ordinary site navigation."""
+    content_data = post.get("content", {})
+    content = content_data.get("rendered", "") if isinstance(content_data, dict) else ""
+    match = re.search(r"(?:<h[2-6][^>]*>\\s*(?:References|참고자료|참고문헌)[^<]*</h[2-6]>)(.*)", content, re.I | re.S)
+    if not match:
+        return []
+    urls = re.findall(r'href=["\\'](https?://[^"\\']+)', match.group(1), flags=re.I)
+    hosts = set()
+    for url in urls:
+        host = (urlsplit(url).hostname or "").lower().removeprefix("www.")
+        if host in SOCIAL_REFERENCE_HOSTS:
+            hosts.add(host)
+    return sorted(hosts)
 
 
 def main() -> int:
@@ -146,14 +168,9 @@ def main() -> int:
     if home_status != 200:
         critical.append(f"홈페이지 HTTP 상태 이상: {home_status}")
     if duplicate_date:
-        warnings.append(
-            "홈페이지/글 목록에서 수정일+게시일이 붙어 보이는 날짜 중복 패턴이 있습니다. "
-            "콘텐츠 품질 문제는 아니지만 재심사 전 테마 표시 개선을 권장합니다."
-        )
+        critical.append("홈페이지/글 목록에서 게시일과 수정일이 붙어 보입니다. 방문자용 날짜 표시를 수정하세요.")
     if missing_trust:
-        warnings.append(
-            "홈/푸터에서 일부 신뢰 페이지 링크가 보이지 않습니다: " + ", ".join(missing_trust)
-        )
+        critical.append("홈/푸터에서 필수 소개·편집정책 등 안내 링크가 누락되었습니다: " + ", ".join(missing_trust))
 
     page_results: list[dict[str, Any]] = []
     for slug, label in REQUIRED_PAGES:
@@ -179,8 +196,12 @@ def main() -> int:
     posts = fetch_published_posts()
     post_results: list[dict[str, Any]] = []
     hard_count = 0
+    social_reference_posts: list[dict[str, Any]] = []
     for post_id, post in posts.items():
         check = classify_post(post)
+        social_hosts = social_hosts_in_references(post)
+        if social_hosts:
+            social_reference_posts.append({"post_id": post_id, "url": check.url, "hosts": social_hosts})
         if check.hard_blockers:
             hard_count += 1
         post_results.append(
@@ -192,7 +213,13 @@ def main() -> int:
                 "warnings": check.warnings,
                 "direct_source_links": check.direct_source_links,
                 "intermediary_links": check.intermediary_links,
+                "social_reference_hosts": social_hosts,
             }
+        )
+    if social_reference_posts:
+        critical.append(
+            f"공개 과학 글의 참고자료에 SNS 출처가 포함된 글 {len(social_reference_posts)}건: "
+            "각 주장에 대응하는 학술·기관 1차 자료로 검증하고 교체하세요."
         )
     if hard_count:
         critical.append(f"현재 공개 글 중 AdSense 하드 블로커가 남은 글: {hard_count}건")
@@ -250,12 +277,19 @@ def main() -> int:
             "사이트 전체 가치가 충분히 보이는지 확인을 권장합니다."
         )
 
+    if not EDITORIAL_SIGNOFF:
+        critical.append(
+            "독립적인 공개 글 품질검토 및 실제 사람 검수 완료가 확인되지 않았습니다. "
+            "사람이 공개 글의 사실성·독창성·참고문헌을 검토한 뒤 ADSENSE_EDITORIAL_SIGNOFF=true로 승인해야 합니다."
+        )
     verdict = "READY" if not critical else "NOT READY"
     report = {
         "checked_at_utc": datetime.now(timezone.utc).isoformat(),
         "site": WP_SITE_URL,
         "strict_mode": STRICT,
         "verdict": verdict,
+        "verdict_scope": "INTERNAL_EDITORIAL_REAPPLICATION_CHECK_NOT_GOOGLE_APPROVAL",
+        "editorial_signoff": EDITORIAL_SIGNOFF,
         "homepage": {
             "http_status": home_status,
             "final_url": home_final,
@@ -274,6 +308,7 @@ def main() -> int:
         "published_posts": {
             "count": len(posts),
             "hard_blocker_posts": hard_count,
+            "social_reference_posts": social_reference_posts,
             "items": post_results,
         },
         "sheet": {
