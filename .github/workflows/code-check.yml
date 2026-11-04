@@ -4,6 +4,13 @@ on:
   pull_request:
     branches:
       - main
+  push:
+    branches:
+      - main
+    paths:
+      - 'adsense_*.py'
+      - '.github/workflows/audit.yml'
+      - '.github/workflows/code-check.yml'
   workflow_dispatch:
 
 jobs:
