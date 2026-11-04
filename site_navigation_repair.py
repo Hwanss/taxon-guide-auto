@@ -69,69 +69,71 @@ def main():
             if isinstance(loc, dict) and loc.get("slug")
         }
 
-    # Primary menu is deliberately preferred: trust links must be visible in main navigation.
-    target_slug = next(
-        (slug for slug, loc in items_by_slug.items()
-         if "primary" in str(loc.get("description", "")).lower()
-         or "primary" in slug.lower() or "menu-1" == slug.lower()), None
-    )
-    target_slug = target_slug or next((k for k in items_by_slug if "footer" in k.lower()), None)
+    # Use the footer location: do NOT activate the old 15-category menu on top.
+    target_slug = next((k for k in items_by_slug if "footer" in k.lower()), None)
     if not target_slug:
-        report["issues"].append("WordPress 테마에서 footer/primary 메뉴 위치를 확인하지 못했습니다.")
+        report["issues"].append("테마 footer 메뉴 위치가 없어 자동 작업을 건너뜁니다.")
     else:
         report["target_location"] = target_slug
         target = items_by_slug[target_slug]
         menu_id = int(target.get("menu") or 0)
-        needs_assignment = False
-        if menu_id <= 0 and len(menus) == 1:
-            candidate = menus[0]
-            if not candidate.get("locations"):
-                # Reuse the only existing unassigned menu. Never replace an active menu.
-                menu_id = int(candidate["id"])
-                needs_assignment = True
-        if menu_id <= 0:
-            report["issues"].append(
-                "기존 메뉴가 없거나 여러 개여서 자동 할당할 수 없습니다. 기존 메뉴를 보존합니다.")
-        else:
-            report["target_menu_id"] = menu_id
-            report["needs_assignment"] = needs_assignment
-            existing = []
+        needs_assignment = menu_id <= 0
+        if needs_assignment:
+            matching = [m for m in menus if m.get("name") == "TaxonGuru 정책 및 안내"]
+            if len(matching) == 1 and not matching[0].get("locations"):
+                menu_id = int(matching[0]["id"])
+            elif not matching and APPLY:
+                created = req("POST", "menus", json={
+                    "name": "TaxonGuru 정책 및 안내",
+                    "description": "AdSense transparency links; existing navigation preserved",
+                })
+                menu_id = int(created["id"])
+                report["created_menu_id"] = menu_id
+            else:
+                report["new_menu_preview"] = "Would create a dedicated footer menu; existing category menu remains untouched"
+
+        report["target_menu_id"] = menu_id or None
+        existing = []
+        if menu_id > 0:
             page = 1
             while True:
-                batch = req("GET", "menu-items", params={"menus": menu_id, "context": "edit", "per_page": 100, "page": page})
+                batch = req("GET", "menu-items", params={
+                    "menus": menu_id, "context": "edit", "per_page": 100, "page": page
+                })
                 existing.extend(batch)
                 if len(batch) < 100:
                     break
                 page += 1
                 if page > 10:
                     raise RuntimeError("메뉴 항목 조회 페이지 제한 초과")
-            report["existing_items"] = [
-                {"id": item.get("id"), "url": item.get("url"), "title": item.get("title")}
-                for item in existing
-            ]
-            existing_urls = {str(item.get("url", "")).rstrip("/").lower() for item in existing}
-            for title, slug in LINKS:
-                url = f"{BASE}/{slug}/"
-                if url.rstrip("/").lower() in existing_urls:
-                    continue
-                if APPLY:
-                    posted = req("POST", "menu-items", json={
-                        "menus": menu_id,
-                        "title": title,
-                        "url": url,
-                        "type": "custom",
-                        "status": "publish",
-                    })
-                    report["changed"].append({"title": title, "url": url, "item_id": posted.get("id")})
-                else:
-                    report["changed"].append({"title": title, "url": url, "action": "would_add"})
-            # Only assign the menu after all five links have been successfully created.
-            if needs_assignment:
-                if APPLY:
-                    req("POST", f"menus/{menu_id}", json={"locations": [target_slug]})
-                    report["assigned_location"] = target_slug
-                else:
-                    report["assignment_preview"] = f"Would assign existing menu {menu_id} to {target_slug}"
+        report["existing_items"] = [
+            {"id": item.get("id"), "url": item.get("url"), "title": item.get("title")}
+            for item in existing
+        ]
+        existing_urls = {str(item.get("url", "")).rstrip("/").lower() for item in existing}
+        for title, slug in LINKS:
+            url = f"{BASE}/{slug}/"
+            if url.rstrip("/").lower() in existing_urls:
+                continue
+            if APPLY and menu_id > 0:
+                posted = req("POST", "menu-items", json={
+                    "menus": menu_id,
+                    "title": title,
+                    "url": url,
+                    "type": "custom",
+                    "status": "publish",
+                })
+                report["changed"].append({"title": title, "url": url, "item_id": posted.get("id")})
+            else:
+                report["changed"].append({"title": title, "url": url, "action": "would_add"})
+
+        # Assign the new footer menu only after all links have been safely created.
+        if needs_assignment:
+            if APPLY and menu_id > 0:
+                req("POST", f"menus/{menu_id}", json={"locations": [target_slug]})
+                report["assigned_location"] = target_slug
+            else:
+                report["assignment_preview"] = f"Would assign dedicated footer menu to {target_slug}"
     output = OUTPUT / "site_navigation_repair.json"
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))
