@@ -89,6 +89,9 @@ jobs:
 
           # AdSense recovery safety gates
           ADSENSE_RECOVERY_MODE: 'true'
+          # After 2026-11-01 low-value-content rejection: no more AI bulk drafts or auto-release.
+          ADSENSE_EDITORIAL_FREEZE: 'true'
+          ADSENSE_EDITORIAL_SIGNOFF: 'false'
           MANUAL_REVIEW_REQUIRED: 'true'
           AUTO_SCHEDULE: 'false'
           DRAFT_ON_REVIEW_FAILURE: 'true'
@@ -98,12 +101,12 @@ jobs:
           PUBLIC_GUARD_ENABLED: 'true'
           PUBLIC_GUARD_BATCH_SIZE: '2'
           PUBLIC_GUARD_MANUAL_QUEUE_SOFT_LIMIT: '24'
-          PUBLIC_GUARD_REQUIRE_MANUAL_CURATION: 'false'
+          PUBLIC_GUARD_REQUIRE_MANUAL_CURATION: 'true'
           PUBLIC_GUARD_DRAFT_HARD_BLOCKERS: 'true'
 
           # v6.4 strict conditional auto-publish
-          AUTO_PUBLISH_ENABLED: 'true'
-          AUTO_PUBLISH_DRY_RUN: 'false'
+          AUTO_PUBLISH_ENABLED: 'false'
+          AUTO_PUBLISH_DRY_RUN: 'true'
           AUTO_PUBLISH_BATCH_SIZE: '4'
           AUTO_PUBLISH_MIN_KO_SCORE: '98'
           AUTO_PUBLISH_MIN_EN_SCORE: '96'
@@ -113,7 +116,7 @@ jobs:
           AUTO_PUBLISH_REQUIRE_IMAGES: 'true'
           AUTO_PUBLISH_CHECK_SOURCE_LINKS: 'true'
           AUTO_PUBLISH_ROLLBACK_ON_RENDER_FAILURE: 'true'
-          AUTO_REWRITE_FAILED_LEGACY: 'true'
+          AUTO_REWRITE_FAILED_LEGACY: 'false'
 
           SCHEDULE_TIMEZONE: 'Asia/Seoul'
           FORCE_IPV4: 'true'
@@ -131,9 +134,9 @@ jobs:
           BODY_IMAGE_MAX_HEIGHT: '520'
           ENABLE_ENGLISH: 'true'
 
-          ALLOW_AI_FEATURED_IMAGE: 'true'
-          PREFER_AI_FEATURED_IMAGE: 'true'
-          GENERATE_AI_BODY_IMAGES: 'true'
+          ALLOW_AI_FEATURED_IMAGE: 'false'
+          PREFER_AI_FEATURED_IMAGE: 'false'
+          GENERATE_AI_BODY_IMAGES: 'false'
           MIN_BODY_IMAGES: '2'
 
           AUTO_CLEANUP_MODE: 'true'
