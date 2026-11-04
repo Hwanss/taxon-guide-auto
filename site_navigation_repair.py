@@ -134,6 +134,18 @@ def main():
                 report["assigned_location"] = target_slug
             else:
                 report["assignment_preview"] = f"Would assign dedicated footer menu to {target_slug}"
+    # Verify the rendered public homepage, not only WordPress API configuration.
+    try:
+        public_home = requests.get(
+            f"{BASE}/", timeout=45,
+            headers={"User-Agent": "TaxonGuruNavigationVerify/1.0", "Cache-Control": "no-cache"},
+        )
+        report["homepage_http"] = public_home.status_code
+        report["homepage_missing_trust_links"] = [
+            slug for _, slug in LINKS if f"/{slug}/" not in public_home.text
+        ]
+    except requests.RequestException as exc:
+        report["issues"].append(f"홈페이지 공개 렌더 확인 실패: {type(exc).__name__}")
     output = OUTPUT / "site_navigation_repair.json"
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))
