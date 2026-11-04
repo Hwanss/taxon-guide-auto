@@ -129,10 +129,10 @@ def social_hosts_in_references(post: dict[str, Any]) -> list[str]:
     """Report social-media URLs used as article references, not ordinary site navigation."""
     content_data = post.get("content", {})
     content = content_data.get("rendered", "") if isinstance(content_data, dict) else ""
-    match = re.search(r"(?:<h[2-6][^>]*>\\s*(?:References|참고자료|참고문헌)[^<]*</h[2-6]>)(.*)", content, re.I | re.S)
+    match = re.search(r"(?:<h[2-6][^>]*>\s*(?:References|참고자료|참고문헌)[^<]*</h[2-6]>)(.*)", content, re.I | re.S)
     if not match:
         return []
-    urls = re.findall(r'href=["\\'](https?://[^"\\']+)', match.group(1), flags=re.I)
+    urls = re.findall(r"""href=["'](https?://[^"']+)""", match.group(1), flags=re.I)
     hosts = set()
     for url in urls:
         host = (urlsplit(url).hostname or "").lower().removeprefix("www.")
