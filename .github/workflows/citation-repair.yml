@@ -23,7 +23,7 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          ADSENSE_CITATION_APPLY: 'true'
+          ADSENSE_CITATION_APPLY: 'false'
         run: python adsense_targeted_citation_repair.py
       - name: Save source backups and per-post outcomes
         if: always()
