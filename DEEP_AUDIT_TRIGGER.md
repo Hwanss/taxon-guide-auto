@@ -5,3 +5,5 @@
 2026-11-05: inspect raw bibliography HTML of 12 flagged public pages for safe editorial correction.
 
 2026-11-05: re-run citation markup inspection with corrected HTML heading regex.
+
+2026-11-05: verify all 58 published posts again after first 12 targeted citation corrections.
