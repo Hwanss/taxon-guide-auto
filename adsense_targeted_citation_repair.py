@@ -49,6 +49,8 @@ for sid,refs in plan.items():
    old,new=(ko_old,ko_new) if sid=="141" else (en_old,en_new)
    if old not in updated:raise ValueError("Exact species-specific claim not found")
    updated=updated.replace(old,new,1)
+   if sid=="141":
+    updated=updated.replace("성인도 거뜬히 물 위에 떠 있을 수 있습니다","잎의 지지력은 종과 잎 상태, 하중 분산 방식에 따라 달라집니다")
   if len(updated)<len(raw)*0.95:raise ValueError("Unexpected HTML size loss")
   if apply:
    api("POST",f"posts/{sid}",json={"content":updated})
