@@ -25,6 +25,12 @@ jobs:
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
           AUDIT_OUTPUT_DIR: audit_output
         run: python adsense_deep_content_audit.py
+      - name: Inspect target citation markup
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+        run: python inspect_reference_fragments.py
       - name: Save full post backups and evidence report
         if: always()
         uses: actions/upload-artifact@v4
