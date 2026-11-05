@@ -1,0 +1,35 @@
+name: TaxonGuru Targeted Citation Repair
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'CITATION_REPAIR_TRIGGER.md'
+jobs:
+  citations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_targeted_citation_repair.py
+      - name: Verify original and repair 12 selected citations
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          ADSENSE_CITATION_APPLY: 'false'
+        run: python adsense_targeted_citation_repair.py
+      - name: Save source backups and per-post outcomes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-citation-repair-${{ github.run_number }}
+          path: audit_output/citation_repair/
+          retention-days: 30
+          if-no-files-found: warn
