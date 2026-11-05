@@ -1,0 +1,35 @@
+name: TaxonGuru Deep Content Audit (Read Only)
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'DEEP_AUDIT_TRIGGER.md'
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_deep_content_audit.py
+      - name: Audit all live posts without changing any
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          AUDIT_OUTPUT_DIR: audit_output
+        run: python adsense_deep_content_audit.py
+      - name: Save full post backups and evidence report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-deep-content-audit-${{ github.run_number }}
+          path: audit_output/deep_content_audit/
+          retention-days: 30
+          if-no-files-found: error
