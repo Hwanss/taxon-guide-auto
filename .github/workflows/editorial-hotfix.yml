@@ -22,7 +22,7 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          ADSENSE_HOTFIX_APPLY: 'false'
+          ADSENSE_HOTFIX_APPLY: 'true'
         run: python adsense_editorial_hotfix.py
       - name: Preserve before-edits original copies
         if: always()
