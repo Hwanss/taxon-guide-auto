@@ -31,6 +31,12 @@ jobs:
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
         run: python inspect_reference_fragments.py
+      - name: Inspect outstanding factual headlines and leaked CSS
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+        run: python inspect_specific_content_issues.py
       - name: Save full post backups and evidence report
         if: always()
         uses: actions/upload-artifact@v4
