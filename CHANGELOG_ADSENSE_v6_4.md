@@ -20,3 +20,9 @@
 - 2026-11-04 후속: 기존 카테고리 메뉴를 유지하면서 새 footer 메뉴(ID 1667)에 안내 링크 5개를 추가했고 공개 홈페이지 HTTP 200 및 누락 링크 0건을 검증했습니다. 재점검을 시작합니다.
 
 - 2026-11-04 후속: 과학 참고자료의 SNS 출처가 발견된 공개 글 URL을 AdSense준비도 시트의 CONTENT_REVIEW 행으로 개별 출력하도록 개선했습니다.
+
+## 2026-11-05 Editorial remediation
+- Published 12 verified citation fixes across six bilingual biology topics; 58-post re-audit confirmed social reference issue count reduced from 12 to 0.
+- Corrected Armillaria's organism-vs-fungus area record in two published articles using Guinness World Records, and removed leaked Commons CSS from two Victoria image credits.
+- All original content backed up as downloadable Actions artifacts. One-time editing workflows reverted to dry-run. Editorial freeze still active.
+- Next: quality review all 58 articles; fix published-date/theme display; require editor signoff before AdSense reapplication.
