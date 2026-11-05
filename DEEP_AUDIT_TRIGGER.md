@@ -7,3 +7,5 @@
 2026-11-05: re-run citation markup inspection with corrected HTML heading regex.
 
 2026-11-05: verify all 58 published posts again after first 12 targeted citation corrections.
+
+2026-11-05: inspect exact fungus title claims and source credit CSS text after citation repair.
