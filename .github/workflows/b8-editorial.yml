@@ -22,7 +22,7 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          EDITORIAL_B8_APPLY: 'true'
+          EDITORIAL_B8_APPLY: 'false'
         run: python adsense_editorial_b8.py
       - name: Keep all originals and results (90 days)
         if: always()
