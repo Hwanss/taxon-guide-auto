@@ -6,3 +6,5 @@
 2026-11-06: publisher-hosted original study link preflight after intermittent PMC 410 in full link audit; no edits yet.
 
 2026-11-06: retry when prior editorial links appear twice in a single WP post; preserve all original HTML.
+
+2026-11-06: two safe backups ready. Apply publisher-open-access link replacement in existing two posts and verify exact WP read-back.
