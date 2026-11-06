@@ -22,7 +22,7 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          BATCH5_APPLY: 'true'
+          BATCH5_APPLY: 'false'
         run: python adsense_science_batch5.py
       - name: Back up eight original posts and report
         if: always()
