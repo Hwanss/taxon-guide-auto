@@ -1,0 +1,32 @@
+name: TaxonGuru Final 12 Anonymous Page Verification
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['FINAL12_PUBLIC_TRIGGER.md']
+jobs:
+  public:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - name: Verify 12 research notes and site pages without login
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+        run: |
+          python -m py_compile adsense_final12_public_check.py
+          python adsense_final12_public_check.py
+      - name: Retain visitor-facing verification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-final12-public-${{ github.run_number }}
+          path: audit_output/final12_public/
+          retention-days: 90
+          if-no-files-found: warn
