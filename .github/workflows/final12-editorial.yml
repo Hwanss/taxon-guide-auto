@@ -1,0 +1,34 @@
+name: TaxonGuru Final 12 Scientific Editorial
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['FINAL12_EDITORIAL_TRIGGER.md']
+jobs:
+  last12:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_final12_editorial.py
+      - name: Backup originals and apply only after exact preflight
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          FINAL12_APPLY: 'false'
+        run: python adsense_final12_editorial.py
+      - name: Archive 12 complete original articles
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-final12-originals-${{ github.run_number }}
+          path: audit_output/final12_evidence/
+          retention-days: 90
+          if-no-files-found: warn
