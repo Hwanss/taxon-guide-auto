@@ -1,0 +1,34 @@
+name: TaxonGuru Next Eight Evidence Editorial
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['C8_EDITORIAL_TRIGGER.md']
+jobs:
+  c8:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_editorial_c8.py
+      - name: Review eight exact-phrase science corrections
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          EDITORIAL_C8_APPLY: 'false'
+        run: python adsense_editorial_c8.py
+      - name: Archive all eight original publications and verification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-c8-originals-${{ github.run_number }}
+          path: audit_output/editorial_c8/
+          retention-days: 90
+          if-no-files-found: warn
