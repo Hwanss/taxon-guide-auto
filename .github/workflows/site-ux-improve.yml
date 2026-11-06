@@ -23,7 +23,7 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          SITE_UX_APPLY: 'false'
+          SITE_UX_APPLY: 'true'
           AUDIT_OUTPUT_DIR: audit_output
         run: python site_ux_improve.py
       - name: Preserve prior values and verification
