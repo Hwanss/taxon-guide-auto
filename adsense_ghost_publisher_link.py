@@ -25,9 +25,9 @@ def main():
   count=html.count(OLD)
   if NEW in html and count==0:
    print("GHOST_PUBLISHER_ALREADY",pid,flush=True);continue
-  if count!=1:raise RuntimeError(f"{pid}: old link phrase match={count}, stop")
+  if count not in (1,2):raise RuntimeError(f"{pid}: old link phrase match={count}, stop")
   (OUT/f"original_{pid}.json").write_text(json.dumps({"post":p},ensure_ascii=False),encoding="utf8")
-  changed[pid]={"old":html,"new":html.replace(OLD,NEW,1)}
+  changed[pid]={"old":html,"new":html.replace(OLD,NEW)}
  print("GHOST_PUBLISHER_PREFLIGHT",len(changed),flush=True)
  for pid,x in changed.items():
   if APPLY:
