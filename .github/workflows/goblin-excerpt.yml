@@ -1,0 +1,34 @@
+name: TaxonGuru Goblin Shark Excerpt Repair
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['GOBLIN_EXCERPT_TRIGGER.md']
+jobs:
+  excerpt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_goblin_excerpt.py
+      - name: Inspect or repair stale goblin shark summary
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          EXCERPT_APPLY: 'false'
+        run: python adsense_goblin_excerpt.py
+      - name: Backup original post data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-goblin-excerpt-${{ github.run_number }}
+          path: audit_output/excerpt_cleanup/
+          retention-days: 90
+          if-no-files-found: warn
