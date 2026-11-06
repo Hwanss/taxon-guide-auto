@@ -61,8 +61,8 @@ DATA={
 <tr><td>{link("icecomp","2025년 물고기 계통 간 비교연구")}</td><td>남극 빙어류와 아시아 국수물고기류의 산소운반 단백질 유전자 퇴화가 독립적으로 일어났음을 분석했습니다.</td><td>다른 계통의 유사한 모습은 정확히 같은 유전자 손실 경로를 뜻하지 않습니다.</td></tr>
 </tbody></table><p>극저온의 용존산소와 큰 심장·많은 혈액량은 상실된 혈색소의 기능을 <strong>부분적으로 보완</strong>하지만, 산소 수송 능력의 제약을 완전히 없애지는 않습니다.</p></section>'''},
 691:{"edits":[
- ("a genetic mutation disrupted hemoglobin synthesis in the ancestors of Chionodraco rastrospinosus",
-  "the ancestral Antarctic icefish lineage lost its hemoglobin gene clusters; comparative genomic research has identified multiple molecular events and sequence remnants around these lost loci"),
+ ("a genetic mutation disrupted hemoglobin synthesis",
+  "genetic changes eliminated the hemoglobin gene clusters"),
  ],
  "note":f'''<section class="{MARK}"><h2>Three genetic studies: what does white blood really reveal?</h2>
 <table><thead><tr><th>Evidence</th><th>What was found</th><th>What remains uncertain</th></tr></thead><tbody>
