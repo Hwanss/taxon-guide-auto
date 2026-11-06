@@ -1,0 +1,34 @@
+name: TaxonGuru Four Bilingual Topics Evidence Repair
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['FOUR_TOPICS_EVIDENCE_TRIGGER.md']
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_four_topic_evidence.py
+      - name: Strict editorial review and optional safe update
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          FOUR_TOPICS_APPLY: 'false'
+        run: python adsense_four_topic_evidence.py
+      - name: Archive exact originals and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-four-topics-evidence-${{ github.run_number }}
+          path: audit_output/four_topic_evidence/
+          retention-days: 90
+          if-no-files-found: warn
