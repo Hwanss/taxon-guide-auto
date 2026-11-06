@@ -1,0 +1,34 @@
+name: TaxonGuru Mimosa Evidence Comparison
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['MIMOSA_EVIDENCE_TRIGGER.md']
+jobs:
+  editorial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_mimosa_evidence.py
+      - name: Inspect and optionally publish science comparison
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          MIMOSA_APPLY: 'false'
+        run: python adsense_mimosa_evidence.py
+      - name: Save original articles and results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-mimosa-evidence-${{ github.run_number }}
+          path: audit_output/mimosa_evidence/
+          retention-days: 90
+          if-no-files-found: warn
