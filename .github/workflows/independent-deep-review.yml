@@ -1,0 +1,31 @@
+name: TaxonGuru Independent Deep Content and Site Review
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['INDEPENDENT_REVIEW_TRIGGER.md']
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests beautifulsoup4
+      - run: python -m py_compile adsense_independent_deep_review.py
+      - name: Review live 54-post corpus, weak source quality and homepage stale links
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+        run: python adsense_independent_deep_review.py
+      - name: Retain 54-post source and publishing evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-taxonguru-deep-review-${{ github.run_number }}
+          path: audit_output/independent_review/
+          retention-days: 90
+          if-no-files-found: warn
