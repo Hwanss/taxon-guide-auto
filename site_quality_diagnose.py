@@ -132,3 +132,24 @@ else:
   results=list(workers.map(validate_guide,urls))
  broken=[r for r in results if r["http"]!=200]
  print("GUIDE_LINK_HEALTH",json.dumps({"total":len(urls),"broken":len(broken),"errors":broken},ensure_ascii=False),flush=True)
+
+# Priority 8 updated pages: anonymous reader-visible verification after editorial writes.
+priority8_paths={
+ 27:"/welwitschia-desert-ancient/",
+ 854:"/en/welwitschia-mirabilis-namib-desert-two-leaf-plant/",
+ 32:"/coelacanth-living-fossil/",
+ 839:"/en/west-indian-ocean-coelacanth-biology-evolution/",
+ 116:"/giant-tube-worm-chemosynthesis/",
+ 797:"/en/giant-tubeworm-riftia-pachyptila-hydrothermal-vents/",
+ 201:"/archaeopteryx-dinosaur-bird-transition/",
+ 386:"/en/archaeopteryx-lithographica-avian-evolution-flight/",
+}
+priority8_public=[]
+for pid,p in priority8_paths.items():
+ status,body=probe_public(p)
+ markers=body.count("taxonguru-priority8-source-review")
+ ok=(status==200 and markers==1)
+ res={"id":pid,"http":status,"research_note_present":markers==1,"ok":ok}
+ priority8_public.append(res)
+ print("PRIORITY8_PUBLIC_CHECK="+json.dumps(res,ensure_ascii=False),flush=True)
+print("PRIORITY8_PUBLIC_SUMMARY="+json.dumps({"checked":len(priority8_public),"ok":sum(x["ok"] for x in priority8_public)},ensure_ascii=False),flush=True)
