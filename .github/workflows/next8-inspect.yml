@@ -37,6 +37,22 @@ jobs:
           path: audit_output/four_topic_public/
           retention-days: 90
           if-no-files-found: warn
+      - name: Inspect next eight article factual claims
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+        run: |
+          python -m py_compile adsense_science_batch5_inspect.py
+          python adsense_science_batch5_inspect.py
+      - name: Archive latest article originals and claims
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-batch5-inspection-${{ github.run_number }}
+          path: audit_output/science_batch5_inspection/
+          retention-days: 90
+          if-no-files-found: warn
       - name: Archive 8 original article objects
         if: always()
         uses: actions/upload-artifact@v4
