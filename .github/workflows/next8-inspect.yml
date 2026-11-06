@@ -23,6 +23,20 @@ jobs:
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
         run: python adsense_next8_inspect.py
+      - name: Verify eight revised public pages as anonymous visitors
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+        run: |
+          python -m py_compile adsense_four_topics_public_check.py
+          python adsense_four_topics_public_check.py
+      - name: Archive public verification status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-four-public-${{ github.run_number }}
+          path: audit_output/four_topic_public/
+          retention-days: 90
+          if-no-files-found: warn
       - name: Archive 8 original article objects
         if: always()
         uses: actions/upload-artifact@v4
