@@ -81,3 +81,13 @@
 - Eight full source HTML originals backed up, exact phrase matches checked, posts remained published, original numbered references and media unchanged. WordPress edit verification: https://github.com/Hwanss/taxon-guide-auto/actions/runs/42199550805.
 - Anonymous visitor checks for eight live URLs: 8/8 HTTP 200, evidence comparisons visible: https://github.com/Hwanss/taxon-guide-auto/actions/runs/42199888712.
 - Total focused articles improved in the current 54-post plan: **26**; **28** still require specific content review. Automatic writing/offline editing and AdSense reapplication remain disabled; human expert signoff is NOT yet complete.
+
+
+## 2026-11-06 Fourth bilingual focus batch, 8 more posts corrected (34/54)
+- Giant squid (162/715): replaced certainty about one panmictic global species with the actual scope of a 2013 study of 43 mitochondrial samples and its call for nuclear-DNA validation; compared measured 13 m record vs inferred possible size. Smithsonian and Proceedings B cited.
+- Dragon blood tree (176/673): qualified resin's lab-level antimicrobial bioactivity versus clinical efficacy and plant wound sterilization; linked 2021 chemical review, NIH LiverTox and Socotra conservation literature.
+- Goblin shark (231/460): compared 2016 direct filming of five strikes by two sharks (3.14 m/s maximum lower jaw tip movement) with the shark's body speed and history of an ancient family. Corrected overconfident "125 million years fully adapted" Korean homepage excerpt.
+- Nautilus (209/401): removed unsourced post-Pleistocene species-origin date and universal spiral growth-ratio claims; linked empirical shell geometry study and NOAA biological summary.
+- Fully backed up exact WordPress originals and strict phrase-match results. Eight posts re-read after changes, original images/references/status preserved. https://github.com/Hwanss/taxon-guide-auto/actions/runs/42201902851.
+- Anonymous eight post URLs all HTTP 200 with source-analysis section visible; goblin shark public snippet updated as checked by public REST API. https://github.com/Hwanss/taxon-guide-auto/actions/runs/42202938555.
+- One-time write workflows switched OFF after success. 34 of 54 in this focused editorial run have been updated, 20 need review. Not human-expert signoff, not Google approval. Keep automatic publishing and AdSense reapplication disabled.
