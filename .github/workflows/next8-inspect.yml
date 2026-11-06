@@ -1,0 +1,33 @@
+name: TaxonGuru Next Eight Content Inspection
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['NEXT8_INSPECT_TRIGGER.md']
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 13
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_next8_inspect.py
+      - name: Capture 8 exact published editorial paragraphs
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+        run: python adsense_next8_inspect.py
+      - name: Archive 8 original article objects
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-inspect-eight-${{ github.run_number }}
+          path: audit_output/next8_inspection/
+          retention-days: 90
+          if-no-files-found: warn
