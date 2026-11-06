@@ -68,9 +68,10 @@ POSTS={
  35:{
   "excerpt":"흉내문어는 가자미류·쏠배감펭·바다뱀 등을 닮은 자세와 무늬를 보이는 동적 모방으로 알려져 있습니다. 하지만 모방 대상이 정확히 세 종 또는 열다섯 종으로 확정된 것은 아닙니다. 초기 현장 관찰 연구를 통해 실제 모방 행동을 살펴봅니다.",
   "replacement":[
-    ["영상 자치 자료","현장 촬영 영상 자료"],
-    ["정밀하게 검증된 흉내문어의 모방 대상은 3종으로 확인되었습니다",
-     "초기 관찰 연구에서 가자미류·쏠배감펭·바다뱀 등의 모방 사례가 대표적으로 보고되었습니다. 다만 모방 대상이 정확히 세 종으로 제한된다고 확정된 것은 아닙니다"],
+    ["과학자들이 촬영된 영상 자치 자료와 동적 모방 행동을 엄격하게 분석한 결과, 정밀하게 검증된 흉내문어의 모방 대상은 3종으로 확인되었습니다",
+     "연구자들이 현장에서 촬영한 영상과 행동을 분석한 결과, 흉내문어가 가자미류·쏠배감펭·바다뱀 등의 모습을 모방하는 사례가 보고되었습니다. 다만 모방 대상이 정확히 세 종뿐이라고 확정된 것은 아닙니다"],
+    ["15가지 동물로 변신하는 사기캐? 오해와 진실을 파헤치다",
+     "흉내문어는 정말 15가지 동물을 흉내 낼까? 관찰 기록과 주장의 차이"],
     ["단 3가지 생물만을 엄격하게 모방하더라도",
      "몇 가지 대표적인 모방 행동만 살펴보더라도"],
   ],
@@ -86,6 +87,8 @@ POSTS={
      "illustrated by several well-described model animals"],
     ["the octopus thrives because its three models represent widespread, well-recognized threats in its environment",
      "these familiar mimicry forms may offer defensive advantages in its habitat"],
+    ["Anatomy of an Illusion: Three Verified Performances",
+     "Anatomy of an Illusion: Three Well-Known Examples"],
   ],
   "reference":{4:"https://pmc.ncbi.nlm.nih.gov/articles/PMC1088805/"},
   "note":'<p><strong>Evidence qualification:</strong> <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC1088805/" target="_blank" rel="noopener noreferrer">Norman, Finn &amp; Tregenza (2001)</a> documented dynamic mimicry and several model-like postures in observed octopuses. The well-known flatfish, lionfish and sea-snake examples should not be mistaken for a conclusive upper limit of three possible mimicked species.</p>',
