@@ -49,8 +49,10 @@ DATA={
 "edits":[
  ("modern skeletal reconstructions have established a verified wingspan of 10 to 11 meters",
   "modern skeletal reconstructions generally estimate a 10-to-11-meter wingspan from incomplete remains and comparisons with smaller relatives"),
- ("Rather than running on two hind legs like modern birds, Quetzalcoatlus used all four limbs to leap into the air",
-  "Quadrupedal launching is one proposed model for Quetzalcoatlus; another functional-anatomy study regards bipedal jumping as plausible, so no single launch method is established"),
+ ("Rather than running on two hind legs like modern birds, ",
+  "In one proposed reconstruction, "),
+ ("used all four limbs to leap into the air",
+  "might use all four limbs to leap, although functional-anatomy research also regards bipedal jumps as plausible"),
  ("it vaulted roughly 2.4 meters (8 feet) into the air before beginning its very first wingbeat",
   "modeled launch sequences explore the clearance needed for an effective first wingbeat, but a 2.4-meter leap was not directly measured from a fossil"),
  ],
