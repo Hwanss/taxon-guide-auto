@@ -22,7 +22,7 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          PRIORITY8_APPLY: 'false'
+          PRIORITY8_APPLY: 'true'
         run: python adsense_priority8_editorial.py
       - name: Save all eight originals and outcomes
         if: always()
