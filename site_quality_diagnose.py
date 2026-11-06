@@ -76,3 +76,39 @@ for article in soup.select("article"):
 style=soup.select_one("style#taxonguru-date-display-fix")
 print("DATE_CSS_TAG",bool(style),"DATE_CSS_TEXT",repr(style.get_text() if style else ""),flush=True)
 print("FRONT_AUTHOR_BRAND", "TaxonGuru 운영자" in soup.get_text(" ",strip=True),flush=True)
+
+# Pre-application public site readiness (read only)
+def probe_public(path):
+ try:
+  response=requests.get(base+path,headers={"User-Agent":"TaxonGuruPreAdSenseCheck/1.0","Cache-Control":"no-cache"},timeout=40)
+  return response.status_code, response.text[:600000]
+ except requests.RequestException as error:
+  print("SITE_PROBE_ERROR",path,type(error).__name__,flush=True)
+  return 0,""
+
+settings=get("/wp-json/wp/v2/settings",params={"context":"edit"})
+if settings.status_code==200:
+ cfg=settings.json()
+ print("READINESS_SETTINGS",json.dumps({k:cfg.get(k) for k in ("title","description","url","timezone","show_on_front","posts_per_page","blog_public")},ensure_ascii=False),flush=True)
+for route in ("/robots.txt","/sitemap_index.xml","/wp-sitemap.xml","/ads.txt","/reading-guide/","/editorial-policy/","/privacy-policy/","/contact-and-corrections/"):
+ status,body=probe_public(route)
+ x={"path":route,"status":status,"length":len(body)}
+ if route=="/robots.txt":
+  x["no_global_disallow"]=not bool(re.search(r"(?im)^Disallow:\s*/\s*$",body))
+ if route=="/ads.txt":
+  x["google_direct"]=bool(re.search(r"(?im)^google\.com\s*,\s*pub-\d+\s*,\s*DIRECT",body))
+ if route=="/reading-guide/":
+  x["guide_present"]="taxonguru-reader-guide-v1" in body
+ print("PUBLIC_HEALTH",json.dumps(x,ensure_ascii=False),flush=True)
+homepage=BeautifulSoup(txt,"html.parser")
+get_attr=lambda selector,attr: [x.get(attr) for x in homepage.select(selector)]
+print("SEO_SNIPPET",json.dumps({
+ "title":homepage.title.get_text(" ",strip=True) if homepage.title else None,
+ "meta_description":get_attr('meta[name="description"]',"content")[:2],
+ "canonical":get_attr('link[rel="canonical"]',"href")[:2],
+ "robots_meta":get_attr('meta[name="robots"]',"content")[:2],
+ "adsense_script_present":"pagead2.googlesyndication.com/pagead/js/adsbygoogle.js" in txt,
+ "adsense_client_present":bool(re.search(r"ca-pub-\d+",txt)),
+ "reading_guide_homepage":"/reading-guide/" in txt,
+ "date_css_present":bool(homepage.select_one("style#taxonguru-date-display-fix")),
+},ensure_ascii=False),flush=True)
