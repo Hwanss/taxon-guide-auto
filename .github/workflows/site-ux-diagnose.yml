@@ -1,0 +1,25 @@
+name: TaxonGuru Site UX Diagnosis (Read Only)
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['SITE_UX_DIAG_TRIGGER.md']
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests beautifulsoup4
+      - run: python -m py_compile site_quality_diagnose.py
+      - name: Inspect frontend date HTML and editability
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+        run: python site_quality_diagnose.py
