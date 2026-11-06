@@ -91,3 +91,14 @@
 - Fully backed up exact WordPress originals and strict phrase-match results. Eight posts re-read after changes, original images/references/status preserved. https://github.com/Hwanss/taxon-guide-auto/actions/runs/42201902851.
 - Anonymous eight post URLs all HTTP 200 with source-analysis section visible; goblin shark public snippet updated as checked by public REST API. https://github.com/Hwanss/taxon-guide-auto/actions/runs/42202938555.
 - One-time write workflows switched OFF after success. 34 of 54 in this focused editorial run have been updated, 20 need review. Not human-expert signoff, not Google approval. Keep automatic publishing and AdSense reapplication disabled.
+
+
+## 2026-11-06 Batch 5: eight science articles plus two snippets improved (42/54)
+- Megalodon 164/709: comparison of 2025 possible 24.3 m/slender body reconstruction, newly rediscovered 2026 Danish vertebra diameter, and explicitly model-based 2008 bite force estimate.
+- Antarctic icefish 170/691: corrected misconception that one species alone lacks hemoglobin; compared 2024–2025 studies on hemoglobin gene cluster losses, related candidate genes, and independent loss patterns across fish clades.
+- Vampire squid 180/661: corrected inaccurate "hardening" description of food aggregation, compared ROV, stomach studies, and aquarium filament observations from 2012 Royal Society source.
+- Mimic octopus 35/829: compared nine observed individual octopuses in 2001 field work, 2005 species description, and Guinness compilation of 16 mimicked animals. No false claim that exactly three or fifteen modes exhaust the repertoire.
+- All eight original WordPress posts backed up and re-read with public status, images and numbered reference IDs retained: https://github.com/Hwanss/taxon-guide-auto/actions/runs/42205136568.
+- Fixed two outdated Korean homepage excerpts for megalodon and icefish after previewing originals: https://github.com/Hwanss/taxon-guide-auto/actions/runs/42206036808.
+- Anonymous public HTTP 200 and research panels in 8/8; snippets 2/2 correct: https://github.com/Hwanss/taxon-guide-auto/actions/runs/42206386668.
+- Focused 54-post review status 42 completed, 12 remain across six bilingual topics; some remaining posts have previous partial fixes and must not be counted prematurely. Do not auto-approve or reapply for AdSense. All one-time write toggles restored false.
