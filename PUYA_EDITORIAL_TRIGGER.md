@@ -2,3 +2,5 @@
 2026-11-06: read-only preview of strict bilingual correction from Botanic Gardens Sydney, Frontiers 2024, and Guinness.
 
 2026-11-06: rerun read-only editorial preflight after fixing Python string quotations; no WordPress writes.
+
+2026-11-06: strict dry-run passed for two articles; apply verified lifespan nuance, title and excerpts with backups.
