@@ -23,7 +23,7 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          SCIENCE_EDIT_APPLY: 'true'
+          SCIENCE_EDIT_APPLY: 'false'
         run: python adsense_science_evidence_fixes.py
       - name: Preserve six original posts and verification
         if: always()
