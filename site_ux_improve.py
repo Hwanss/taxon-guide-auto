@@ -59,7 +59,12 @@ def read_context():
     footer=[x for x in sidebars if x.get("id")=="footer-1" and x.get("status")=="active"]
     if not footer:raise RuntimeError("Footer-1 widget sidebar is not active; do not alter theme")
     widgets=req("GET","widgets",params={"context":"edit","per_page":100})
-    matching=[x for x in widgets if "taxonguru-date-display-fix" in (x.get("rendered") or "")]
+    matching=[x for x in widgets if (
+        "taxonguru-date-display-fix" in (x.get("rendered") or "")
+        or "taxonguru-date-display-fix" in (
+            (x.get("instance") or {}).get("raw") or {}
+        ).get("content","")
+    )]
     return posts,author,widgets,matching
 
 def main():
@@ -99,7 +104,21 @@ def main():
     else: result["author"]="WOULD_UPDATE"
 
     if len(existing)>1:raise RuntimeError("Multiple existing date-style widgets found; no further changes")
-    if existing:result["css_widget"]="ALREADY_FIXED"
+    if existing:
+        wid=existing[0]["id"]
+        if existing[0].get("sidebar")=="footer-1" and "taxonguru-date-display-fix" in existing[0].get("rendered",""):
+            result["css_widget"]="ALREADY_FIXED"
+        elif APPLY:
+            footer=req("GET","sidebars/footer-1",params={"context":"edit"})
+            ids=list(footer.get("widgets",[]))
+            if wid not in ids:ids.append(wid)
+            req("POST","sidebars/footer-1",json={"widgets":ids})
+            revised=req("GET",f"widgets/{wid}",params={"context":"edit"})
+            if revised.get("sidebar")!="footer-1":
+                raise RuntimeError(f"Sidebar placement not retained for {wid}")
+            result["css_widget"]="ASSIGNED_TO_FOOTER:"+wid
+        else:
+            result["css_widget"]="WOULD_ASSIGN_EXISTING:"+wid
     elif APPLY:
         response=req("POST","widgets",json={
             "id_base":"custom_html","sidebar":"footer-1",
