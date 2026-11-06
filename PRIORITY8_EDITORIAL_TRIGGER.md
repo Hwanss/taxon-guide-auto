@@ -4,3 +4,5 @@
 2026-11-06: rerun eight-article preview after clarifying Korean Archaeopteryx flight sentence, all originals must be backed up.
 
 2026-11-06: final 8/8 source-exact dry run succeeded. Apply 4 bilingual topics, preserve originals and verify live posts.
+
+2026-11-06: trigger stabilized workflow to preview 8 new B-priority articles; no production edits, all originals backed up.
