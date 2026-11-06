@@ -33,3 +33,11 @@
 - Added four researched bilingual comparison sections (Armillaria area record and Victoria species/weight distinctions), independently backed by Guinness and RBG Kew references, with original posts backed up and WordPress re-read validation.
 - Restored mutation workflows to dry-run. AI auto-publication and rewriting remain frozen pending editorial sign-off.
 - This commit triggers read-only AdSense Recovery/Public Guard/Readiness for a post-change snapshot; no reapplication is requested.
+
+## 2026-11-06 Final 58-article verification
+- Re-read all 58 published WordPress articles and checked 4,127 in-text citation links against 480 reference entries; found zero broken internal reference IDs.
+- Full bibliography reachability audit: 236 distinct source URLs; final result 180 reachable, 55 access-restricted, 1 network error, zero HTTP 404/410. The remaining DOI network error was independently identified at the original journal's publisher site.
+- Corrected six published articles on giant sequoia mass versus trunk-volume records, Quetzalcoatlus shoulder height, and documented mimic-octopus behavior; original posts backed up.
+- The single malformed Quetzalcoatlus DOI, affecting two language editions, was repaired and the 236-source URL scan was repeated.
+- Independent editorial sign-off remains FALSE. Human fact-check and originality review is NOT complete. Do not imply Google AdSense is approved or guaranteed.
+- Trigger read-only readiness validation for the live changes.
