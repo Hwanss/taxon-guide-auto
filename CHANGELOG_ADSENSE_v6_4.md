@@ -64,3 +64,10 @@
 - Independently requested all eight public URLs anonymously: HTTP 200 and evidence panels present for 8/8. Run https://github.com/Hwanss/taxon-guide-auto/actions/runs/42193588279.
 - Count of currently published posts should remain 54. Cumulative progress for current final editorial batch: 10 targeted updated, remaining 44 need individual source/originality review. This is NOT a claim that expert signoff is complete.
 - All editorial workflows restored to no-write preview, no AdSense submission requested.
+
+## 2026-11-06 B-priority eight science topics corrected (review batch 18/54)
+- Published precise source-backed corrections in KO/EN for Venus flytrap IDs 26/859, Echiniscus testudo IDs 154/739, Atlantic horseshoe crab IDs 146/763, Tiktaalik IDs 150/751.
+- Evidence: Bohm et al 2016 action potentials; Youngsteadt et al 2018 pollinator field observations; Roszkowska et al 2023 species-specific anhydrobiosis; E. testudo multiomics; USP <86> recombinant endotoxin assay; 2026 FDA review; 2006 Nature and 2024 PNAS Tiktaalik axial skeleton.
+- Corrected outdated claims including a universal feeding percentage, all-condition invincibility, blanket reagent approval and nonexistent Tiktaalik sacral specialization.
+- Original WordPress content backed up in Actions 42196882656; eight live posts re-read; anonymous public page checks HTTP 200 and visible evidence panels for 8/8 in 42197102778.
+- Current public content count expected 54. Current focused editorial improvements: 18/54; remaining 36 require source-by-source verification. This does not imply independent expert signoff or Google AdSense approval. Keep auto publishing and rewriting disabled and AdSense reapplication pending.
