@@ -41,3 +41,10 @@
 - The single malformed Quetzalcoatlus DOI, affecting two language editions, was repaired and the 236-source URL scan was repeated.
 - Independent editorial sign-off remains FALSE. Human fact-check and originality review is NOT complete. Do not imply Google AdSense is approved or guaranteed.
 - Trigger read-only readiness validation for the live changes.
+
+## 2026-11-06: Visitor-first site and AdSense pre-application improvements
+- Published researched bilingual TaxonGuru reading guide /reading-guide/ with five cross-topic comparisons and verified institutional sources. Linked from live homepage sidebar and existing footer menu; empty recent-comments widget unassigned, not deleted. Public HTTP 200 and visible link verified.
+- Corrected Puya raimondii bilingual headlines, excerpts and flowering-age claims using botanical and peer-reviewed sources, including the exceptional 28-year cultivated record. Originals backed up; live updates verified.
+- Fixed the previously blank WordPress site tagline with a precise bilingual biological science purpose. Preserved original site URLs, search visibility and AdSense settings.
+- Verified public robots.txt, both XML sitemap endpoints, ads.txt with Google DIRECT record, an AdSense client/script, index-follow, policy pages and canonical homepage HTTPS. Technical checks do not prove AdSense approval or ad serving.
+- All one-time write workflows restored to read-only previews. Editorial signoff remains FALSE. Run safe automated readiness again, but do not auto-submit AdSense.
