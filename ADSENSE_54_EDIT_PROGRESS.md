@@ -53,3 +53,9 @@
 - ID 201/386 (시조새): 화석 날개뼈로 추론한 비행과 실제 관찰의 차이를 교정, 2018·2025 원연구 비교
 - 원본 8건은 GitHub Actions artifact 백업. WordPress 재조회에서 8/8 공개 유지, 이미지 개수 및 기존 참고문헌 ID 불변 확인. [확인](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42193342823)
 - 남은 공개 글: 44건에 대한 별도 문장별 검증/교정 필요. **AdSense 내부 편집 서명은 아직 false**, 재신청하지 않음.
+
+## 2026-11-06 공개 페이지 8건 최종 검증
+- [x] 일반 방문자(WordPress 비로그인) 상태로 8개 URL 모두 HTTP 200 반환
+- [x] 8개 모든 공개 페이지에서 원자료 비교 섹션 표시됨 (8/8)
+- [검증 실행 기록](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42193588279)
+- 다음 단계 B 우선 44건 중 사실 오류·핵심 주장 근거가 취약한 글부터 원문 대조. 아직 44건 편집 검수 미완료.
