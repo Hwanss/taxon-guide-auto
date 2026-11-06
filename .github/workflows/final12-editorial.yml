@@ -22,7 +22,7 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          FINAL12_APPLY: 'false'
+          FINAL12_APPLY: 'true'
         run: python adsense_final12_editorial.py
       - name: Archive 12 complete original articles
         if: always()
