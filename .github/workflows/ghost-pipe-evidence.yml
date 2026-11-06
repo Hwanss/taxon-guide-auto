@@ -1,0 +1,34 @@
+name: TaxonGuru 2025 Ghost Pipe Evidence Comparison
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['GHOST_PIPE_EVIDENCE_TRIGGER.md']
+jobs:
+  improve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_ghost_pipe_research.py
+      - name: Insert verified 2025-study comparison in two original articles
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          GHOST_PIPE_APPLY: 'false'
+        run: python adsense_ghost_pipe_research.py
+      - name: Save exact article originals
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-ghost-pipe-originals-${{ github.run_number }}
+          path: audit_output/ghost_pipe_evidence/
+          retention-days: 90
+          if-no-files-found: warn
