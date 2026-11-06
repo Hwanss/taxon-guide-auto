@@ -22,7 +22,7 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          DOI_HOTFIX_APPLY: 'true'
+          DOI_HOTFIX_APPLY: 'false'
         run: python adsense_source_url_hotfix.py
       - name: Save original reference pages
         if: always()
