@@ -1,0 +1,31 @@
+name: TaxonGuru All 54 Public Content Quality Gate
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['FINAL54_QUALITY_TRIGGER.md']
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 23
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests beautifulsoup4
+      - run: python -m py_compile adsense_final54_quality_gate.py
+      - name: Inspect all 54 published content pages and linked site resources
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+        run: python adsense_final54_quality_gate.py
+      - name: Archive all sitewide quality and original-source signals
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-final54-quality-${{ github.run_number }}
+          path: audit_output/final54_quality/
+          retention-days: 90
+          if-no-files-found: warn
