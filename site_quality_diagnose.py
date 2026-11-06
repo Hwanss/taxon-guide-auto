@@ -44,3 +44,17 @@ for endpoint in ("/wp-json/wp/v2/types/custom_css","/wp-json/wp/v2/widgets","/wp
   data=r.json()
   if isinstance(data,dict): print("ENDPOINT_OBJECT",endpoint,list(data.keys())[:12],flush=True)
   elif isinstance(data,list):print("ENDPOINT_LIST",endpoint,len(data),[x.get("id",x.get("plugin",x.get("name"))) for x in data[:15]],flush=True)
+
+# Preflight of safe no-theme-file WordPress UX repairs
+r=get("/wp-json/wp/v2/sidebars",params={"context":"edit"})
+if r.status_code==200:
+ for x in r.json():
+  print("SIDEBAR",json.dumps({k:x.get(k) for k in ("id","name","status","widgets","class","description")},ensure_ascii=False)[:1000],flush=True)
+r=get("/wp-json/wp/v2/widgets",params={"context":"edit","per_page":100})
+if r.status_code==200:
+ for x in r.json():
+  print("WIDGET",json.dumps({k:x.get(k) for k in ("id","id_base","sidebar","rendered","instance")},ensure_ascii=False)[:650],flush=True)
+r=get("/wp-json/wp/v2/users/me",params={"context":"edit"})
+if r.status_code==200:
+ x=r.json()
+ print("AUTHOR_PROFILE",json.dumps({k:x.get(k) for k in ("id","name","slug","nickname","display_name","url")},ensure_ascii=False),flush=True)
