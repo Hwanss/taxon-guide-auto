@@ -103,7 +103,7 @@ def main():
     elif APPLY:
         response=req("POST","widgets",json={
             "id_base":"custom_html","sidebar":"footer-1",
-            "instance":{"title":"","content":STYLE}
+            "instance":{"raw":{"title":"","content":STYLE}}
         })
         wid=response["id"]
         actual=req("GET",f"widgets/{wid}",params={"context":"edit"})
