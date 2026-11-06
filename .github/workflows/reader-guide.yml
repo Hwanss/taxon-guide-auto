@@ -22,7 +22,7 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          READER_GUIDE_APPLY: 'false'
+          READER_GUIDE_APPLY: 'true'
         run: python adsense_reader_guide.py
       - name: Archive pre-change navigation and verification
         if: always()
