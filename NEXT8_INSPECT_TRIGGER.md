@@ -7,3 +7,5 @@
 2026-11-06: anonymous check of all eight edited megalodon, icefish, vampire squid and mimic octopus public pages.
 
 2026-11-06: recheck eight public research panels plus two corrected excerpts anonymously after snippet publication.
+
+2026-11-06 final batch: read-only inspection of 12 last articles and all existing evidence panels. No WordPress edits in this run.
