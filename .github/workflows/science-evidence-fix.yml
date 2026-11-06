@@ -1,0 +1,35 @@
+name: TaxonGuru Final Science Evidence Corrections
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'SCIENCE_EVIDENCE_FIX_TRIGGER.md'
+jobs:
+  science-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_science_evidence_fixes.py
+      - name: Validate and optionally apply six source-backed corrections
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          SCIENCE_EDIT_APPLY: 'false'
+        run: python adsense_science_evidence_fixes.py
+      - name: Preserve six original posts and verification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-source-backed-corrections-${{ github.run_number }}
+          path: audit_output/science_editorial/
+          retention-days: 30
+          if-no-files-found: warn
