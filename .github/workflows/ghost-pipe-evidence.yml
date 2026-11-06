@@ -29,7 +29,7 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          GHOST_SOURCE_APPLY: 'true'
+          GHOST_SOURCE_APPLY: 'false'
         run: |
           python -m py_compile adsense_ghost_publisher_link.py
           python adsense_ghost_publisher_link.py
