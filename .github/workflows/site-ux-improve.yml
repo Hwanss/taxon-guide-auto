@@ -1,0 +1,36 @@
+name: TaxonGuru Site UX Improvement
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'SITE_UX_APPLY_TRIGGER.md'
+jobs:
+  site-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile site_ux_improve.py
+      - name: Apply minimal verified display fixes
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          SITE_UX_APPLY: 'false'
+          AUDIT_OUTPUT_DIR: audit_output
+        run: python site_ux_improve.py
+      - name: Preserve prior values and verification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-ux-fix-${{ github.run_number }}
+          path: audit_output/ux_improvement/
+          retention-days: 30
+          if-no-files-found: warn
