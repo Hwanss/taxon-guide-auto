@@ -22,7 +22,7 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          SITE_PURPOSE_APPLY: 'true'
+          SITE_PURPOSE_APPLY: 'false'
         run: python adsense_site_purpose.py
       - name: Archive original settings and check
         if: always()
