@@ -48,3 +48,11 @@
 - Fixed the previously blank WordPress site tagline with a precise bilingual biological science purpose. Preserved original site URLs, search visibility and AdSense settings.
 - Verified public robots.txt, both XML sitemap endpoints, ads.txt with Google DIRECT record, an AdSense client/script, index-follow, policy pages and canonical homepage HTTPS. Technical checks do not prove AdSense approval or ad serving.
 - All one-time write workflows restored to read-only previews. Editorial signoff remains FALSE. Run safe automated readiness again, but do not auto-submit AdSense.
+
+## 2026-11-06 Independent originality risk triage and editorial actions
+- Applied Google's published criteria concerning useful, original content and scalable AI rewriting as a qualitative EDITORIAL standard, not an imitation of Google's proprietary approval classifier.
+- A direct 58-post review surfaced two pairs with under-supported health/science claims: Axolotl/neoteny and regeneration (WordPress IDs 34, 834); Hydnellum peckii/no known lethal toxins and medical anticoagulant implications (IDs 260, 535).
+- Four posts temporarily moved from PUBLISHED to DRAFT. All originals and metadata were backed up in Actions artifact; no posts deleted; anonymous REST recheck returned HTTP 401. Publication should resume only after primary-source substantiation and rewritten claims.
+- Improved BOTH published ghost pipe (Monotropa uniflora, IDs 254, 518) articles using a human-readable original comparison of two actual 2025 peer-reviewed studies. Explained that non-detection of certain toxins in 50 samples and surveyed traditional uses do NOT prove efficacy or ingestion safety. Original WP content archived and verified.
+- Restored all writing workflows to preview-only. Public count expected 54, draft queue expected 54 (including 4 newly held); automatic publishing/editorial signoff remains OFF.
+- Google AdSense review status is NOT yet known; no auto-approval or AdSense reapplication has been performed. Independent human expert review is still pending.
