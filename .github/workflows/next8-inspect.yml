@@ -53,6 +53,20 @@ jobs:
           path: audit_output/science_batch5_inspection/
           retention-days: 90
           if-no-files-found: warn
+      - name: Verify Batch 5 evidence panels on public eight pages
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+        run: |
+          python -m py_compile adsense_batch5_public_check.py
+          python adsense_batch5_public_check.py
+      - name: Archive Batch 5 anonymous visibility results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-batch5-public-${{ github.run_number }}
+          path: audit_output/batch5_public/
+          retention-days: 90
+          if-no-files-found: warn
       - name: Archive 8 original article objects
         if: always()
         uses: actions/upload-artifact@v4
