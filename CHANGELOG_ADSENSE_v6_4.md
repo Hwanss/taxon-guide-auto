@@ -56,3 +56,11 @@
 - Improved BOTH published ghost pipe (Monotropa uniflora, IDs 254, 518) articles using a human-readable original comparison of two actual 2025 peer-reviewed studies. Explained that non-detection of certain toxins in 50 samples and surveyed traditional uses do NOT prove efficacy or ingestion safety. Original WP content archived and verified.
 - Restored all writing workflows to preview-only. Public count expected 54, draft queue expected 54 (including 4 newly held); automatic publishing/editorial signoff remains OFF.
 - Google AdSense review status is NOT yet known; no auto-approval or AdSense reapplication has been performed. Independent human expert review is still pending.
+
+## 2026-11-06 54-post progress: eight priority posts actually updated and independently verified
+- Full WordPress source preflight and backups for eight published posts (Welwitschia 27/854, Coelacanth 32/839, Riftia 116/797, Archaeopteryx 201/386).
+- Added primary-study and institutional evidence comparisons. Narrowed misleading claims about fog uptake and groundwater, lifespan/gestation estimates, vent-fluid temperature vs animal habitat, and reconstructed flight.
+- 8/8 posts re-read after REST edits; public status, images and numbered references retained.
+- Independently requested all eight public URLs anonymously: HTTP 200 and evidence panels present for 8/8. Run https://github.com/Hwanss/taxon-guide-auto/actions/runs/42193588279.
+- Count of currently published posts should remain 54. Cumulative progress for current final editorial batch: 10 targeted updated, remaining 44 need individual source/originality review. This is NOT a claim that expert signoff is complete.
+- All editorial workflows restored to no-write preview, no AdSense submission requested.
