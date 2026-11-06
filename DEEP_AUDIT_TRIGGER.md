@@ -13,3 +13,5 @@
 2026-11-06: final 58-post editorial verification after all Nov 6 edits. Preserve exact live originals and review queue.
 
 2026-11-06: final 58-post snapshot after six independent facts corrections, malformed DOI fix, and source URL health retest.
+
+2026-11-06: verify 54 currently published posts and generate strict per-post triage priorities; preserve originals, no edits during collection.
