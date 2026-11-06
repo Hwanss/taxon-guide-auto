@@ -11,3 +11,5 @@
 2026-11-06: verify official Google AdSense technical pre-application signals: site indexing, ads.txt, ad script, sitemaps, metadata, new reading guide.
 
 2026-11-06: verify every internal link on /reading-guide/ resolves publicly (strict anonymous HTTP 200).
+
+2026-11-06: anonymous HTTP check of all eight priority science articles after verified WordPress edits.
