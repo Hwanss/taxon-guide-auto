@@ -112,3 +112,23 @@ print("SEO_SNIPPET",json.dumps({
  "reading_guide_homepage":"/reading-guide/" in txt,
  "date_css_present":bool(homepage.select_one("style#taxonguru-date-display-fix")),
 },ensure_ascii=False),flush=True)
+
+# Extra risk: all internal links on the newly curated reading guide must resolve.
+from concurrent.futures import ThreadPoolExecutor
+guide_response=get("/reading-guide/")
+guide_soup=BeautifulSoup(guide_response.text,"html.parser")
+guide_main=guide_soup.find(id="taxonguru-reader-guide-v1")
+if not guide_main:
+ print("GUIDE_LINKS_MISSING_CONTENT",flush=True)
+else:
+ urls=sorted(set(a.get("href") for a in guide_main.select("a[href]") if (a.get("href") or "").startswith(base+"/")))
+ def validate_guide(u):
+  try:
+   r=requests.get(u,timeout=22,allow_redirects=True,headers={"User-Agent":"TaxonGuruInternalLinkCheck/1.0"})
+   return {"url":u,"http":r.status_code,"final_url":r.url}
+  except requests.RequestException as exc:
+   return {"url":u,"http":0,"error":type(exc).__name__}
+ with ThreadPoolExecutor(max_workers=8) as workers:
+  results=list(workers.map(validate_guide,urls))
+ broken=[r for r in results if r["http"]!=200]
+ print("GUIDE_LINK_HEALTH",json.dumps({"total":len(urls),"broken":len(broken),"errors":broken},ensure_ascii=False),flush=True)
