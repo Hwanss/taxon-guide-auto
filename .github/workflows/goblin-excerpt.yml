@@ -22,7 +22,7 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          EXCERPT_APPLY: 'true'
+          EXCERPT_APPLY: 'false'
         run: python adsense_goblin_excerpt.py
       - name: Backup original post data
         if: always()
