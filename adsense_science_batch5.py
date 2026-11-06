@@ -99,8 +99,8 @@ DATA={
 <tr><td>{link("mimicg","기네스 세계기록의 16종 목록")}</td><td>가자미·바다뱀·쏠배감펭 등을 포함해 <strong>16가지 모방 형태</strong>를 소개합니다.</td><td>기네스가 소개한 목록과 논문에서 독립 검증된 각각의 행동을 동일 수준의 증거라고 취급해서는 안 됩니다.</td></tr>
 </tbody></table><p>따라서 횟수나 종류만 세기보다 <strong>누가, 어떤 환경에서, 어떤 행동을 관찰했는지</strong>와 다른 생물의 반응을 함께 살펴보는 것이 중요합니다.</p></section>'''},
 829:{"edits":[
- ("The widespread assertion that Thaumoctopus mimicus effortlessly transforms into fifteen distinct marine species appears frequently in popular media",
-  "Popular lists give varying totals for the mimic octopus, including a Guinness World Records list of sixteen modeled animals, but the strength of field evidence differs among suggested resemblances"),
+ ("effortlessly transforms into fifteen distinct marine species",
+  "has a fixed repertoire of precisely fifteen proven model species"),
  ],
  "note":f'''<section class="{MARK}"><h2>Three, fifteen or sixteen disguises? Distinguishing papers from record lists</h2>
 <table><thead><tr><th>Source</th><th>What it actually documented</th><th>What cannot be inferred</th></tr></thead><tbody>
