@@ -67,3 +67,12 @@ if r.status_code==200:
   instance=w.get("instance",{})
   print("CUSTOM_HTML_WIDGET",json.dumps({"id":w.get("id"),"sidebar":w.get("sidebar"),"rendered":w.get("rendered"),"instance":instance},ensure_ascii=False)[:1800],flush=True)
 print("PUBLIC_DATE_CSS_MARKER", "taxonguru-date-display-fix" in txt,flush=True)
+
+# Inspect authoritative generated frontend cards after WordPress REST updates
+for article in soup.select("article"):
+ cardtext=article.get_text(" ",strip=True)
+ if ("Oregon" in cardtext and "Humongous" in cardtext) or ("어두운뽕나무버섯" in cardtext):
+  print("FRONT_CARD",repr(cardtext[:1000]),flush=True)
+style=soup.select_one("style#taxonguru-date-display-fix")
+print("DATE_CSS_TAG",bool(style),"DATE_CSS_TEXT",repr(style.get_text() if style else ""),flush=True)
+print("FRONT_AUTHOR_BRAND", "TaxonGuru 운영자" in soup.get_text(" ",strip=True),flush=True)
