@@ -38,7 +38,7 @@ SPEC={
  ("Under ideal cultivated conditions in botanical gardens, where warmth and water are consistently managed, this growth period can shorten significantly to about 28 to 30 years",
   "An exceptional plant grown at the University of California Botanical Garden was recorded flowering after about 28 years, according to Guinness World Records"),
  ],
- "extra":'<p><strong>What the evidence supports:</strong> The <a href="'+SOURCES[0]+'" target="_blank" rel="noopener noreferrer">Botanic Gardens of Sydney</a> describes a roughly 80–100-year life history. A <a href="'+SOURCES[1]+'" target="_blank" rel="noopener noreferrer">2024 ecology review</a> gives a roughly 60–100-year range, while <a href="'+SOURCES[2]+'" target="_blank" rel="noopener noreferrer">Guinness World Records</a> includes a cultivated example flowering after about 28 years. These estimates differ, but all agree that the plant flowers only once, not once every 100 years.</p>"}
+ "extra":'<p><strong>What the evidence supports:</strong> The <a href="'+SOURCES[0]+'" target="_blank" rel="noopener noreferrer">Botanic Gardens of Sydney</a> describes a roughly 80–100-year life history. A <a href="'+SOURCES[1]+'" target="_blank" rel="noopener noreferrer">2024 ecology review</a> gives a roughly 60–100-year range, while <a href="'+SOURCES[2]+'" target="_blank" rel="noopener noreferrer">Guinness World Records</a> includes a cultivated example flowering after about 28 years. These estimates differ, but all agree that the plant flowers only once, not once every 100 years.</p>'}
 }
 def call(method,route,**kw):
  r=s.request(method,BASE+"/wp-json/wp/v2/"+route,timeout=75,**kw);r.raise_for_status();return r.json()
