@@ -22,7 +22,7 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          PUYA_EDIT_APPLY: 'false'
+          PUYA_EDIT_APPLY: 'true'
         run: python adsense_puya_editorial.py
       - name: Archive original pages before corrections
         if: always()
