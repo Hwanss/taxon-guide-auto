@@ -9,3 +9,5 @@
 2026-11-06: validate live homepage card text, author display and CSS after safe editorial UX changes.
 
 2026-11-06: verify official Google AdSense technical pre-application signals: site indexing, ads.txt, ad script, sitemaps, metadata, new reading guide.
+
+2026-11-06: verify every internal link on /reading-guide/ resolves publicly (strict anonymous HTTP 200).
