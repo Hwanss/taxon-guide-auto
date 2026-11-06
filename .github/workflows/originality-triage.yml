@@ -1,0 +1,34 @@
+name: TaxonGuru Independent Originality Triage
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['ORIGINALITY_TRIAGE_TRIGGER.md']
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_originality_triage.py
+      - name: Preflight WordPress articles and apply editorial hold if enabled
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          EDITORIAL_TRIAGE_APPLY: 'false'
+        run: python adsense_originality_triage.py
+      - name: Archive WordPress originals and reversible editorial decision
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-originality-triage-${{ github.run_number }}
+          path: audit_output/originality_triage/
+          retention-days: 90
+          if-no-files-found: warn
