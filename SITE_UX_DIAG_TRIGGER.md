@@ -15,3 +15,5 @@
 2026-11-06: anonymous HTTP check of all eight priority science articles after verified WordPress edits.
 
 2026-11-06: verify 8 additional B-priority science posts on anonymous public site; ensure each rendered evidence section and HTTP 200.
+
+2026-11-06: independently verify 8 corrected C8 science pages with anonymous HTTP 200 and public comparison panel.
