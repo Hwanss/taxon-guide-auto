@@ -24,6 +24,23 @@ jobs:
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
           GHOST_PIPE_APPLY: 'false'
         run: python adsense_ghost_pipe_research.py
+      - name: Preview optional publisher-link reliability correction
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          GHOST_SOURCE_APPLY: 'false'
+        run: |
+          python -m py_compile adsense_ghost_publisher_link.py
+          python adsense_ghost_publisher_link.py
+      - name: Preserve originals for source URL correction
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-ghost-source-${{ github.run_number }}
+          path: audit_output/ghost_publisher_link/
+          retention-days: 90
+          if-no-files-found: warn
       - name: Save exact article originals
         if: always()
         uses: actions/upload-artifact@v4
