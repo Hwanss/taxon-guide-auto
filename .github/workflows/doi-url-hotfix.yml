@@ -1,0 +1,34 @@
+name: TaxonGuru Broken DOI Repair
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['DOI_FIX_TRIGGER.md']
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_source_url_hotfix.py
+      - name: Repair only known incorrect bibliography DOI
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          DOI_HOTFIX_APPLY: 'false'
+        run: python adsense_source_url_hotfix.py
+      - name: Save original reference pages
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-doi-fix-${{ github.run_number }}
+          path: audit_output/doi_url_hotfix/
+          retention-days: 30
+          if-no-files-found: warn
