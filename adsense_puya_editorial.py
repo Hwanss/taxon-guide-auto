@@ -28,7 +28,7 @@ SPEC={
  ("반면 적절한 온도와 영양이 공급되는 식물원 같은 재배 환경에서는 약 28~30년 만에 꽃을 피우기도 합니다",
   "기네스 기록에는 캘리포니아대 버클리 식물원에서 재배한 개체가 약 28년 만에 개화한 예외 사례도 소개되어 있습니다"),
  ],
- "extra":'<p><strong>개화 연령의 근거 비교:</strong> <a href="'+SOURCES[0]+'" target="_blank" rel="noopener noreferrer">시드니 식물원</a>은 약 80~100년, <a href="'+SOURCES[1]+'" target="_blank" rel="noopener noreferrer">2024년 생태학 리뷰</a>는 약 60~100년을 소개합니다. <a href="'+SOURCES[2]+'" target="_blank" rel="noopener noreferrer">기네스의 기록</a>은 야생 추정치와 약 28년 만의 재배 개화 사례를 함께 설명합니다. 이는 개화 시점이 일정한 주기가 아니라 생애 한 번의 사건임을 보여줍니다.</p>"},
+ "extra":'<p><strong>개화 연령의 근거 비교:</strong> <a href="'+SOURCES[0]+'" target="_blank" rel="noopener noreferrer">시드니 식물원</a>은 약 80~100년, <a href="'+SOURCES[1]+'" target="_blank" rel="noopener noreferrer">2024년 생태학 리뷰</a>는 약 60~100년을 소개합니다. <a href="'+SOURCES[2]+'" target="_blank" rel="noopener noreferrer">기네스의 기록</a>은 야생 추정치와 약 28년 만의 재배 개화 사례를 함께 설명합니다. 이는 개화 시점이 일정한 주기가 아니라 생애 한 번의 사건임을 보여줍니다.</p>'},
 449:{"original_title":"Puya raimondii: The Queen of the Andes That Waits a Century to Bloom",
  "title":"Puya raimondii: The Queen of the Andes That Flowers Once",
  "excerpt":"Puya raimondii is a giant Andean bromeliad that flowers once before dying. Published estimates for its age at flowering vary, and a cultivated specimen reportedly flowered after 28 years. Compare the life-history evidence, inflorescence and conservation challenges.",
