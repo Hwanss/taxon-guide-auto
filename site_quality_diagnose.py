@@ -176,3 +176,26 @@ for pid,path in b8_pages.items():
 print("B8_PUBLIC_SUMMARY="+json.dumps({"checked":len(b8_checks),
  "ok":sum(p["ok"] for p in b8_checks),"failures":[p for p in b8_checks if not p["ok"]]},
  ensure_ascii=False),flush=True)
+
+# C8: verify each evidence-corrected live page as a non-logged-in visitor.
+c8_paths={
+ 24:"/corpse-flower-giant-stinker/",
+ 864:"/en/understanding-amorphophallus-titanum-titan-arum/",
+ 30:"/tyrannosaurus-rex/",
+ 849:"/en/how-tyrannosaurus-rex-survived-and-dominated-late-cretaceous/",
+ 111:"/bristlecone-pine-oldest-tree/",
+ 792:"/en/great-basin-bristlecone-pine-longevity-survival/",
+ 137:"/rafflesia-arnoldii-largest-flower/",
+ 787:"/en/rafflesia-arnoldii-worlds-largest-single-flower/",
+}
+c8_results=[]
+for pid,path in c8_paths.items():
+ code,page=probe_public(path)
+ marker_count=page.count("taxonguru-c8-evidence-nov2026")
+ row={"id":pid,"http":code,"evidence_panel":marker_count==1,"ok":code==200 and marker_count==1}
+ c8_results.append(row)
+ print("C8_PUBLIC_ITEM="+json.dumps(row,ensure_ascii=False),flush=True)
+print("C8_PUBLIC_SUMMARY="+json.dumps({
+ "count":len(c8_results),"ok":sum(x["ok"] for x in c8_results),
+ "failed":[x for x in c8_results if not x["ok"]]
+},ensure_ascii=False),flush=True)
