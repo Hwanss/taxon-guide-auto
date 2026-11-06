@@ -5,3 +5,5 @@
 2026-11-06: dry-run passed. Apply public author, two stale excerpt fixes, and a footer-scoped display CSS widget; backup first.
 
 2026-11-06: retry only remaining date-style widget with WordPress instance.raw payload; excerpts and author updated on first attempt.
+
+2026-11-06: attach backed-up existing inactive CSS widget custom_html-2 to footer-1 through sidebar API; leave posts/profile unchanged.
