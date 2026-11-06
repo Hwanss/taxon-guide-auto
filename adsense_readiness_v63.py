@@ -155,13 +155,36 @@ def main() -> int:
 
     home_status, home_final, home_html = public_get(f"{WP_SITE_URL}/")
     plain_home = re.sub(r"<[^>]+>", " ", home_html)
-    duplicate_date = bool(
+    raw_duplicate_date = bool(
         re.search(
             r"\d{1,2}월\s*\d{1,2}\s*,?\s*20\d{2}\s*"
             r"\d{1,2}월\s*\d{1,2}\s*,?\s*20\d{2}",
             plain_home,
         )
     )
+    # The classic Oceanly Green theme emits two adjacent <time> elements.
+    # WordPress's footer widget now hides the second date in rendered output.
+    # Preserve the raw markup signal, but do not fail the visitor-facing UX test
+    # when this exact verified stylesheet is present.
+    date_css_match = re.search(
+        r'<style\b[^>]*id=["\']taxonguru-date-display-fix["\'][^>]*>(.*?)</style>',
+        home_html,
+        flags=re.I | re.S,
+    )
+    date_css_valid = bool(
+        date_css_match
+        and re.search(
+            r'\.posted-on\s+time\.updated\s*\{\s*display\s*:\s*none\s*!important\s*\}',
+            date_css_match.group(1),
+            flags=re.I,
+        )
+    )
+    duplicate_date = raw_duplicate_date and not date_css_valid
+    if raw_duplicate_date and date_css_valid:
+        warnings.append(
+            "방문자 화면에는 날짜 중복 방지 CSS가 적용되어 있습니다. "
+            "테마 업데이트 시 CSS 유지 여부를 재확인하세요."
+        )
     trust_links: dict[str, bool] = {}
     for slug, _label in REQUIRED_PAGES:
         trust_links[slug] = bool(
@@ -301,6 +324,8 @@ def main() -> int:
             "http_status": home_status,
             "final_url": home_final,
             "duplicate_date_pattern": duplicate_date,
+            "raw_adjacent_date_markup": raw_duplicate_date,
+            "date_css_verified": date_css_valid,
             "trust_links": trust_links,
             "missing_trust_links": missing_trust,
         },
