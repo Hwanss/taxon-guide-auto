@@ -67,6 +67,22 @@ jobs:
           path: audit_output/batch5_public/
           retention-days: 90
           if-no-files-found: warn
+      - name: Inspect remaining twelve public science posts
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+        run: |
+          python -m py_compile adsense_final12_inspect.py
+          python adsense_final12_inspect.py
+      - name: Archive final twelve exact WordPress originals
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-final12-inspection-${{ github.run_number }}
+          path: audit_output/final12_inspection/
+          retention-days: 90
+          if-no-files-found: warn
       - name: Archive 8 original article objects
         if: always()
         uses: actions/upload-artifact@v4
