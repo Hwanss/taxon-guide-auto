@@ -22,7 +22,7 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          FOUR_TOPICS_APPLY: 'false'
+          FOUR_TOPICS_APPLY: 'true'
         run: python adsense_four_topic_evidence.py
       - name: Archive exact originals and report
         if: always()
