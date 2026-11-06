@@ -1,0 +1,34 @@
+name: TaxonGuru Science Batch 5 Evidence Review
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['BATCH5_REVIEW_TRIGGER.md']
+jobs:
+  editorial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_science_batch5.py
+      - name: Preflight and optionally update eight exact science passages
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          BATCH5_APPLY: 'false'
+        run: python adsense_science_batch5.py
+      - name: Back up eight original posts and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-batch5-backups-${{ github.run_number }}
+          path: audit_output/science_batch5/
+          retention-days: 90
+          if-no-files-found: warn
