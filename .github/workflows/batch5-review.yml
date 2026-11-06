@@ -24,6 +24,23 @@ jobs:
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
           BATCH5_APPLY: 'false'
         run: python adsense_science_batch5.py
+      - name: Validate and optionally repair two homepage snippets
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          B5_EXCERPT_APPLY: 'false'
+        run: |
+          python -m py_compile adsense_batch5_excerpt.py
+          python adsense_batch5_excerpt.py
+      - name: Archive two original snippet snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-b5-snippets-${{ github.run_number }}
+          path: audit_output/batch5_excerpt/
+          retention-days: 90
+          if-no-files-found: warn
       - name: Back up eight original posts and report
         if: always()
         uses: actions/upload-artifact@v4
