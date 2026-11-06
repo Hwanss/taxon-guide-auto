@@ -1,0 +1,33 @@
+name: TaxonGuru Bibliography URL Health Check
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['BIBLIOGRAPHY_SCAN_TRIGGER.md']
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests beautifulsoup4
+      - run: python -m py_compile adsense_reference_url_check.py
+      - name: Test each live source URL for reachability
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+        run: python adsense_reference_url_check.py
+      - name: Save results as CSV and JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-source-url-health-${{ github.run_number }}
+          path: audit_output/source_health/
+          retention-days: 30
+          if-no-files-found: warn
