@@ -6,3 +6,5 @@
 2026-11-06: rerun no-write verification for English mimic-octopus paragraph with inline taxonomic italics.
 
 2026-11-06: all eight dry-runs passed, back up eight public originals and apply the carefully checked science corrections.
+
+2026-11-06: read-only preview to correct two stale homepage summaries for megalodon and icefish after eight successful article edits.
