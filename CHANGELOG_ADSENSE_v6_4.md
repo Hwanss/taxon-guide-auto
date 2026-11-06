@@ -102,3 +102,16 @@
 - Fixed two outdated Korean homepage excerpts for megalodon and icefish after previewing originals: https://github.com/Hwanss/taxon-guide-auto/actions/runs/42206036808.
 - Anonymous public HTTP 200 and research panels in 8/8; snippets 2/2 correct: https://github.com/Hwanss/taxon-guide-auto/actions/runs/42206386668.
 - Focused 54-post review status 42 completed, 12 remain across six bilingual topics; some remaining posts have previous partial fixes and must not be counted prematurely. Do not auto-approve or reapply for AdSense. All one-time write toggles restored false.
+
+
+## 2026-11-06 Final 12 science articles updated; all 54 focused articles now improved
+- Quetzalcoatlus 123/807: 2021 JVP functional morphology supports multiple possible takeoff models; removed certainty that four-limbed 2.4m leap occurred.
+- Victoria amazonica 141/775: preserved Kew's distinctions between Victoria species and giant leaf load demonstration, added explicit no-standing safety caution from Kew.
+- Giant sequoia 178/667: corrected exclusive fire-only seed release claim using U.S. Forest Service; distinguished NPS 1487m³ trunk volume from Guinness differently measured 1591m³.
+- Armillaria ostoyae 221/434: matched 2003 Ferguson et al fungal genet testing and 965-ha mapped boundary; no assertion of solid hyphae filling every cubic metre.
+- Puya raimondii 227/449: reversed misleading claim that protocarnivory had been scientifically disproved; 2024 review calls for further research.
+- Monotropa uniflora 254/518: distinguished non-detection of grayanane toxins in fifty 2025 samples from broad consumption safety and medical efficacy.
+- All 12 source posts archived in artifacts, existing image counts and numbered citations preserved, posts remain published. https://github.com/Hwanss/taxon-guide-auto/actions/runs/42222977327.
+- Twelve unauthenticated public page tests all HTTP 200 with new comparison notes visible: https://github.com/Hwanss/taxon-guide-auto/actions/runs/42223274940.
+- All 54 currently published posts in the focused AdSense originality-support plan have now received an individual source-evidence correction/improvement (27 KO + 27 EN). This is not an external expert certification or guarantee of original material under Google's proprietary criteria.
+- The four previously risky articles remain drafts; 50 earlier drafts are held. All editorial apply toggles OFF; do not flip ADSENSE_EDITORIAL_SIGNOFF, do not submit AdSense. Next stage: final read-only 54-page sitewide crawl/link/metadata audit and independent editor decision.
