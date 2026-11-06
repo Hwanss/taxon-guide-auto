@@ -1,0 +1,35 @@
+name: TaxonGuru Evidence-Based Article Comparisons
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'EDITORIAL_COMPARISON_TRIGGER.md'
+jobs:
+  editorial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_editorial_comparisons.py
+      - name: Validate sourced comparative analysis and update selected articles
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          FACTCHECK_APPLY: 'false'
+        run: python adsense_editorial_comparisons.py
+      - name: Archive exact original pages and validation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-evidence-editorial-${{ github.run_number }}
+          path: audit_output/factcheck_additions/
+          retention-days: 30
+          if-no-files-found: warn
