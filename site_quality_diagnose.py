@@ -153,3 +153,26 @@ for pid,p in priority8_paths.items():
  priority8_public.append(res)
  print("PRIORITY8_PUBLIC_CHECK="+json.dumps(res,ensure_ascii=False),flush=True)
 print("PRIORITY8_PUBLIC_SUMMARY="+json.dumps({"checked":len(priority8_public),"ok":sum(x["ok"] for x in priority8_public)},ensure_ascii=False),flush=True)
+
+# B-priority eight changed posts, anonymous reader-facing verification
+b8_pages={
+26:"/venus-flytrap-carnivorous-plant/",
+859:"/en/venus-flytrap-dionaea-muscipula-guide/",
+154:"/echiniscus-testudo-tardigrade/",
+739:"/en/echiniscus-testudo-armored-turtle-water-bear/",
+146:"/limulus-polyphemus-horseshoe-crab/",
+763:"/en/atlantic-horseshoe-crab-myths-blue-blood-medicine/",
+150:"/tiktaalik-fishapod-evolution/",
+751:"/en/tiktaalik-roseae-devonian-fishapod-evolution/",
+}
+b8_checks=[]
+for pid,path in b8_pages.items():
+ st,body=probe_public(path)
+ marker="taxonguru-b8-evidence-2026"
+ has_note=body.count(marker)==1
+ result={"id":pid,"status":st,"evidence_panel_visible":has_note,"ok":st==200 and has_note}
+ b8_checks.append(result)
+ print("B8_PUBLIC_CHECK="+json.dumps(result,ensure_ascii=False),flush=True)
+print("B8_PUBLIC_SUMMARY="+json.dumps({"checked":len(b8_checks),
+ "ok":sum(p["ok"] for p in b8_checks),"failures":[p for p in b8_checks if not p["ok"]]},
+ ensure_ascii=False),flush=True)
