@@ -4,3 +4,5 @@
 2026-11-06: rerun all source URLs after fixed Quetzalcoatlus DOI reference on both Korean and English posts.
 
 2026-11-06 independent reevaluation: check all citation URLs in 54 published articles after final editorial fixes. Read-only.
+
+2026-11-06: expanded read-only audit: all 54 posts' original references plus comparison-note citations and image-credit links, no production edits.
