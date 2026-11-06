@@ -1,0 +1,34 @@
+name: TaxonGuru Priority 8 Scientific Editorial
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['PRIORITY8_EDITORIAL_TRIGGER.md']
+jobs:
+  priority8:
+    runs-on: ubuntu-latest
+    timeout-minutes: 23
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_priority8_editorial.py
+      - name: Preflight all eight article original-source corrections
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          PRIORITY8_APPLY: 'false'
+        run: python adsense_priority8_editorial.py
+      - name: Save all eight originals and outcomes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-priority8-science-${{ github.run_number }}
+          path: audit_output/priority8_evidence/
+          retention-days: 90
+          if-no-files-found: warn
