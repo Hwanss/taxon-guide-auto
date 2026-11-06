@@ -71,3 +71,13 @@
 - Corrected outdated claims including a universal feeding percentage, all-condition invincibility, blanket reagent approval and nonexistent Tiktaalik sacral specialization.
 - Original WordPress content backed up in Actions 42196882656; eight live posts re-read; anonymous public page checks HTTP 200 and visible evidence panels for 8/8 in 42197102778.
 - Current public content count expected 54. Current focused editorial improvements: 18/54; remaining 36 require source-by-source verification. This does not imply independent expert signoff or Google AdSense approval. Keep auto publishing and rewriting disabled and AdSense reapplication pending.
+
+
+## 2026-11-06: Third batch eight posts revised and verified, cumulative 26/54
+- Titan arum (24,864): Kew Plants of the World Online states systematic natural pollination research is still lacking; replaced unsupported claims that specific insect groups have been proven functional pollinators, retained EN threat status.
+- Tyrannosaurus (30,849): replaced misleading "definitive maximum speed 16-40 km/h"; compared 2017 skeletal-stress model, 2021 preferred walking speed 1.28 m/s, and 2024 maximum-body-mass population estimates.
+- Great Basin bristlecone pine (111,792): corrected categorical claim that Methuselah is the absolute verified oldest tree; showed disagreement over anonymous 5,000-plus-year-old bristlecone record in US federal, Guinness, and 2026 genome research.
+- Rafflesia arnoldii (137,787): distinguished measured 111-cm diameter 2020 Guinness flower from species-level upper mass claim of 11 kg, and official IUCN NE status from conservation warnings.
+- Eight full source HTML originals backed up, exact phrase matches checked, posts remained published, original numbered references and media unchanged. WordPress edit verification: https://github.com/Hwanss/taxon-guide-auto/actions/runs/42199550805.
+- Anonymous visitor checks for eight live URLs: 8/8 HTTP 200, evidence comparisons visible: https://github.com/Hwanss/taxon-guide-auto/actions/runs/42199888712.
+- Total focused articles improved in the current 54-post plan: **26**; **28** still require specific content review. Automatic writing/offline editing and AdSense reapplication remain disabled; human expert signoff is NOT yet complete.
