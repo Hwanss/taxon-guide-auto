@@ -23,6 +23,22 @@ jobs:
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
         run: python adsense_reference_url_check.py
+      - name: Check all external academic and image licensing links in published bodies
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+        run: |
+          python -m py_compile adsense_all_external_links_check.py
+          python adsense_all_external_links_check.py
+      - name: Archive full citation and external media link health
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-all-external-${{ github.run_number }}
+          path: audit_output/all_external_links/
+          retention-days: 30
+          if-no-files-found: warn
       - name: Save results as CSV and JSON
         if: always()
         uses: actions/upload-artifact@v4
