@@ -21,6 +21,20 @@ jobs:
         env:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
         run: python adsense_final54_quality_gate.py
+      - name: Validate all 27 Korean-English reciprocal hreflang pairings
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+        run: |
+          python -m py_compile adsense_bilingual_seo.py
+          python adsense_bilingual_seo.py
+      - name: Archive all bilingual SEO validation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-bilingual-seo-${{ github.run_number }}
+          path: audit_output/bilingual_seo/
+          retention-days: 90
+          if-no-files-found: warn
       - name: Archive all sitewide quality and original-source signals
         if: always()
         uses: actions/upload-artifact@v4
