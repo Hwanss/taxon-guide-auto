@@ -1,0 +1,32 @@
+name: TaxonGuru Real Browser Mobile Visual and UX QA
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['BROWSER_UX_REVIEW_TRIGGER.md']
+jobs:
+  mobile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 23
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install playwright
+      - run: python -m playwright install chromium
+      - run: python -m py_compile adsense_mobile_ux_check.py
+      - name: Emulate smartphone and desktop live pages
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+        run: python adsense_mobile_ux_check.py
+      - name: Retain screenshot evidence and UX metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-mobile-ux-screenshots-${{ github.run_number }}
+          path: audit_output/mobile_ux/
+          retention-days: 90
+          if-no-files-found: warn
