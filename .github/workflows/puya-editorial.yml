@@ -1,0 +1,34 @@
+name: TaxonGuru Puya Evidence Editorial
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['PUYA_EDITORIAL_TRIGGER.md']
+jobs:
+  puya:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_puya_editorial.py
+      - name: Correct Puya wording and title only after strict preflight
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          PUYA_EDIT_APPLY: 'false'
+        run: python adsense_puya_editorial.py
+      - name: Archive original pages before corrections
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-puya-evidence-${{ github.run_number }}
+          path: audit_output/puya_evidence_corrections/
+          retention-days: 30
+          if-no-files-found: warn
