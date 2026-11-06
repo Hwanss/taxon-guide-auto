@@ -58,3 +58,12 @@ r=get("/wp-json/wp/v2/users/me",params={"context":"edit"})
 if r.status_code==200:
  x=r.json()
  print("AUTHOR_PROFILE",json.dumps({k:x.get(k) for k in ("id","name","slug","nickname","display_name","url")},ensure_ascii=False),flush=True)
+
+# Investigate custom HTML widget rendering/sanitization safely
+r=get("/wp-json/wp/v2/widgets",params={"context":"edit","per_page":100})
+if r.status_code==200:
+ for w in r.json():
+  if w.get("id_base")!="custom_html":continue
+  instance=w.get("instance",{})
+  print("CUSTOM_HTML_WIDGET",json.dumps({"id":w.get("id"),"sidebar":w.get("sidebar"),"rendered":w.get("rendered"),"instance":instance},ensure_ascii=False)[:1800],flush=True)
+print("PUBLIC_DATE_CSS_MARKER", "taxonguru-date-display-fix" in txt,flush=True)
