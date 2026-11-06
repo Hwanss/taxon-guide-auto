@@ -26,3 +26,10 @@
 - Corrected Armillaria's organism-vs-fungus area record in two published articles using Guinness World Records, and removed leaked Commons CSS from two Victoria image credits.
 - All original content backed up as downloadable Actions artifacts. One-time editing workflows reverted to dry-run. Editorial freeze still active.
 - Next: quality review all 58 articles; fix published-date/theme display; require editor signoff before AdSense reapplication.
+
+## 2026-11-06: Website UX and cited editorial improvements
+- Corrected the two Armillaria homepage excerpts; original published article contents and dates were preserved.
+- Updated public WordPress author display to TaxonGuru 운영자; added active footer CSS to display just the publication date rather than concatenating publication and modification dates.
+- Added four researched bilingual comparison sections (Armillaria area record and Victoria species/weight distinctions), independently backed by Guinness and RBG Kew references, with original posts backed up and WordPress re-read validation.
+- Restored mutation workflows to dry-run. AI auto-publication and rewriting remain frozen pending editorial sign-off.
+- This commit triggers read-only AdSense Recovery/Public Guard/Readiness for a post-change snapshot; no reapplication is requested.
