@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['PRIORITY8_EDITORIAL_TRIGGER.md']
+    paths: ['PRIORITY8_EDITORIAL_TRIGGER.md', 'B8_EDITORIAL_TRIGGER.md']
 jobs:
   priority8:
     runs-on: ubuntu-latest
@@ -30,5 +30,23 @@ jobs:
         with:
           name: taxonguru-priority8-science-${{ github.run_number }}
           path: audit_output/priority8_evidence/
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Preflight eight B-priority cited science articles
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          EDITORIAL_B8_APPLY: 'false'
+        run: |
+          python -m py_compile adsense_editorial_b8.py
+          python adsense_editorial_b8.py
+      - name: Save eight B-priority originals and checks
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-b8-evidence-${{ github.run_number }}
+          path: audit_output/editorial_b8/
           retention-days: 90
           if-no-files-found: warn
