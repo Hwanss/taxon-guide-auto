@@ -37,9 +37,24 @@ def main():
  original={"widgets":widgets,"sidebars":sidebars,"new_css":STYLE}
  (OUT/"original_widget_metadata.json").write_text(json.dumps(original,ensure_ascii=False,indent=2),encoding="utf8")
  if matched:
-  if matched[0].get("sidebar")!="footer-1":raise RuntimeError("Existing mobile widget not in footer-1")
-  if "stssm-sticky-social-icons" not in widget_source(matched[0]):raise RuntimeError("Unexpected prior CSS content")
-  result={"status":"ALREADY_APPLIED","widget_id":matched[0].get("id")}
+  current=matched[0]
+  wid=current["id"]
+  if "stssm-sticky-social-icons" not in widget_source(current):
+   raise RuntimeError("Existing mobile CSS not matching expected selector; stop")
+  if current.get("sidebar")=="footer-1":
+   result={"status":"ALREADY_APPLIED","widget_id":wid}
+  elif APPLY:
+   # Creation produced inactive WP widget; assign existing, never create duplicate.
+   now=api("GET","sidebars/footer-1",params={"context":"edit"})
+   original_ids=list(now.get("widgets",[]))
+   if wid not in original_ids:
+    api("POST","sidebars/footer-1",json={"widgets":original_ids+[wid]})
+   revised=api("GET","widgets/"+wid,params={"context":"edit"})
+   if revised.get("sidebar")!="footer-1":
+    raise RuntimeError("Reassignment did not persist; refuse duplicate widget")
+   result={"status":"ASSIGNED_EXISTING_WIDGET","widget_id":wid}
+  else:
+   result={"status":"WOULD_ASSIGN_EXISTING_WIDGET","widget_id":wid}
  elif APPLY:
   w=api("POST","widgets",json={"id_base":"custom_html","sidebar":"footer-1","instance":{"raw":{"title":"","content":STYLE}}})
   check=api("GET","widgets/"+w["id"],params={"context":"edit"})
