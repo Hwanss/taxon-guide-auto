@@ -15,3 +15,5 @@
 2026-11-06: final 58-post snapshot after six independent facts corrections, malformed DOI fix, and source URL health retest.
 
 2026-11-06: verify 54 currently published posts and generate strict per-post triage priorities; preserve originals, no edits during collection.
+
+2026-11-08: Scheduled remediation baseline re-audit, read-only. Reconcile 54 public posts and citation fragments; no publishing or approval changes.
