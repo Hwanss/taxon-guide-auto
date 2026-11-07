@@ -22,7 +22,7 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          MOBILE_FIX_APPLY: 'true'
+          MOBILE_FIX_APPLY: 'false'
         run: python adsense_mobile_floating_fix_20261107.py
       - name: Archive prior WordPress widgets and modified CSS
         if: always()
