@@ -22,7 +22,7 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          BIBLIO_UPLIFT_APPLY: 'false'
+          BIBLIO_UPLIFT_APPLY: 'true'
         run: python adsense_source_uplift_20261107.py
       - name: Save original WordPress content and citation corrections
         if: always()
