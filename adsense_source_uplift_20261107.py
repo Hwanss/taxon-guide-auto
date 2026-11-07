@@ -92,5 +92,5 @@ def main():
   line={"post":pid,"status":"UPDATED" if APPLY and data["before"]!=data["after"] else "PREVIEW" if not APPLY else "ALREADY","ref_ids":data["updated_ref_ids"],"url":data["url"]}
   results.append(line);print("BIBLIO_ITEM="+json.dumps(line,ensure_ascii=False),flush=True)
  (OUT/"report.json").write_text(json.dumps({"apply":APPLY,"results":results,"utc":datetime.now(timezone.utc).isoformat()},ensure_ascii=False,indent=2),encoding="utf8")
- print("BIBLIO_SUMMARY="+json.dumps({"apply":APPLY,"updated_ref_count":sum(len(x["updated_ref_ids"]) for x in results) if APPLY else 0,"preflight_refs":sum(len(x["updated_ref_ids"]) for x in results),"posts":len(results)},ensure_ascii=False),flush=True)
+ print("BIBLIO_SUMMARY="+json.dumps({"apply":APPLY,"updated_ref_count":sum(len(x["ref_ids"]) for x in results) if APPLY else 0,"preflight_refs":sum(len(x["ref_ids"]) for x in results),"posts":len(results)},ensure_ascii=False),flush=True)
 if __name__=="__main__":main()
