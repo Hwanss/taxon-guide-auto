@@ -22,6 +22,17 @@ def main():
    print("MOBILE_DOM_SHARE="+json.dumps({"tag":el.name,"classes":classes[:210],"id":identifier[:120],"html":str(el)[:260]},ensure_ascii=False),flush=True)
  widgets=api("widgets?context=edit&per_page=100")
  for w in widgets:
+  if w.get("id_base")=="custom_html":
+   instance=w.get("instance") or {}
+   raw=instance.get("raw") if isinstance(instance,dict) else None
+   raw_content=(raw or {}).get("content","") if isinstance(raw,dict) else ""
+   rendered=w.get("rendered") or ""
+   print("WIDGET_DEBUG="+json.dumps({"id":w.get("id"),"sidebar":w.get("sidebar"),"raw_content_length":len(raw_content),"rendered_length":len(rendered),"has_marker_in_raw":"taxonguru-mobile-reader-ux-20261107" in raw_content,"has_marker_in_rendered":"taxonguru-mobile-reader-ux-20261107" in rendered,"content_head":raw_content[:220]},ensure_ascii=False),flush=True)
+ footer=api("sidebars/footer-1?context=edit")
+ print("FOOTER_DEBUG="+json.dumps({"widget_count":len(footer.get("widgets",[])),"widget_ids":footer.get("widgets",[])},ensure_ascii=False),flush=True)
+ print("PUBLIC_CSS_DEBUG="+json.dumps({"home_contains_mobile_css":"taxonguru-mobile-reader-ux-20261107" in s.get(BASE+"/",timeout=60).text},ensure_ascii=False),flush=True)
+
+ for w in widgets:
   data=w.get("instance",{})
   content=((data.get("raw") or {}).get("content") or "") if isinstance(data,dict) else ""
   if any(x in content for x in ("taxonguru-date-display-fix","@media","a2a_","sharethis","font-size")):
