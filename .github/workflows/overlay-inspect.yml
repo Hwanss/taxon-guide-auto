@@ -1,0 +1,23 @@
+name: TaxonGuru Mobile Floating Overlay Selector Check
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['OVERLAY_INSPECT_TRIGGER.md']
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install playwright
+      - run: python -m playwright install chromium
+      - name: Inspect real injected social share elements in mobile DOM
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+        run: python adsense_overlay_inspect.py
