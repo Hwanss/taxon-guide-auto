@@ -1,0 +1,25 @@
+name: TaxonGuru Mobile and Science Reference Preflight
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['MOBILE_SOURCE_PREFLIGHT_TRIGGER.md']
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests beautifulsoup4
+      - run: python -m py_compile adsense_mobile_source_preflight.py
+      - name: Check exact mobile sharing markup and eight scholarly bibliographies
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+        run: python adsense_mobile_source_preflight.py
