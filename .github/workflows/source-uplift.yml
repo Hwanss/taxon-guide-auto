@@ -1,0 +1,34 @@
+name: TaxonGuru Verified Scholarly Source Uplift
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['SOURCE_UPLIFT_TRIGGER.md']
+jobs:
+  editorial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_source_uplift_20261107.py
+      - name: Exact-match and backup-first scientific source update
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          BIBLIO_UPLIFT_APPLY: 'false'
+        run: python adsense_source_uplift_20261107.py
+      - name: Save original WordPress content and citation corrections
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-bibliography-uplift-${{ github.run_number }}
+          path: audit_output/bibliography_uplift/
+          retention-days: 90
+          if-no-files-found: warn
