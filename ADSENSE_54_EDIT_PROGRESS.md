@@ -123,3 +123,13 @@
 - [x] 동일 언어 내 본문 서두의 완전 중복 없음, 높은 6어절 조각 유사도 결과 없음 (이는 웹 전체 대상 표절 조사나 원본성 보증이 아님)
 - [전수 검사 수행 기록](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42223816624)
 - **현재 완료 범위:** 54/54 주요 과학 주장에 대한 AI 보조 편집적 근거 보강 및 공개 HTML 전수 자동검사. **미완료:** 실제 사람의 독립적인 독창성·사실·사이트 모바일 화면 최종 확인 및 재신청 의사결정.
+
+## 2026-11-07 실제 개선: 참고문헌 12개와 모바일 읽기 경험
+- [x] 푸야 라이몬디 227/449, 거북곰벌레 154/739, 케찰코아틀루스 123/807 **6개 글에서 약한 참고 링크 12개**를 검증된 원논문·학술지/대학 자료로 교체
+- [x] 원본/인용 번호 보존, WordPress 수정 후 실제 공개 6개 글에서 12개 링크 모두 확인 — [편집](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42349640516) · [방문자 검증](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42350207818)
+- [x] 모바일 오른쪽 고정 공유바 숨김 (390px Chromium `display:none`), 글 내부 공유 아이콘 유지, 본문 16px, PC 공유바 유지 — [모바일·데스크톱 검증](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42350207818)
+- [x] 약한 참고 링크 재집계 **84개 → 72개**, 54개 공개 글 유지. [재감사](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42350323011)
+- [ ] 남은 약한 참고 링크 72개 및 본문 직접 연결 없는 참고문헌 47개 검토
+- [ ] 문맥 있는 한/영 관련 글 링크, 개별 독창성 평가, 실제 Search Console 색인 및 독립 편집 검토
+- **[2026-11-07 수정·검증 세부 보고서](https://github.com/Hwanss/taxon-guide-auto/blob/main/ADSENSE_REMEDIATION_20261107.md)**
+- **안전:** 실 WordPress 원본 백업, 일회성 변경 워크플로 미리보기 전용 복귀. 신규 자동발행·AdSense 재신청·사람 승인 서명 실행 안 함.
