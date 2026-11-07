@@ -17,7 +17,15 @@ jobs:
           python-version: '3.12'
       - run: pip install playwright
       - run: python -m playwright install chromium
-      - name: Inspect real injected social share elements in mobile DOM
+      - name: Verify real mobile CSS and 12 newly published primary-study citations
         env:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
         run: python adsense_overlay_inspect.py
+      - name: Archive after-repair mobile and desktop screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-mobile-after-${{ github.run_number }}
+          path: audit_output/mobile_verified/
+          retention-days: 90
+          if-no-files-found: warn
