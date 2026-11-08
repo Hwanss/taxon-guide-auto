@@ -133,3 +133,11 @@
 - [ ] 문맥 있는 한/영 관련 글 링크, 개별 독창성 평가, 실제 Search Console 색인 및 독립 편집 검토
 - **[2026-11-07 수정·검증 세부 보고서](https://github.com/Hwanss/taxon-guide-auto/blob/main/ADSENSE_REMEDIATION_20261107.md)**
 - **안전:** 실 WordPress 원본 백업, 일회성 변경 워크플로 미리보기 전용 복귀. 신규 자동발행·AdSense 재신청·사람 승인 서명 실행 안 함.
+
+## 2026-11-09 자동 차수: 11-08 읽기 전용 감사 결과 확인 (본문 변경 없음)
+- [x] 2026-11-08 08:23 KST 완료된 [Deep Content Audit #9](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42425019028) 성공 로그와 [artifact #13595018169](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42425019028/artifacts/13595018169) 존재 확인. 작업은 읽기 전용이며 전체 게시물 백업 및 증거 파일을 artifact로 보관(만료 예정 2026-12-08 KST).
+- [x] 해당 시점 WordPress 인증 API 조사 결과 공개 글 54건, SNS 참고문헌 글 0, 참고문헌 섹션/링크 누락 글 0, 이미지 없는 글 0. 공통 편집정책 문단은 한/영 각 27개 글에서 반복됨. 이는 독창성 전체 검증이나 54개 공개 URL HTTP 200 재검증을 의미하지 않음.
+- [x] 원본 참고문헌 마크업 실측: 빅토리아수련 ID 141/775 ref-1 Wikipedia Victoria amazonica, ref-4 Amazon River Lodge 블로그, ref-6 Wikipedia Victoria (plant) 확인. ref-2는 PMC9289450, ref-5는 Kew 기관 자료. **각 번호의 본문 인용 관계와 원자료의 주장 적합성 미검증이므로 자동 교체·삭제 금지.**
+- [x] 푸야 라이몬디 ID 227/449 ref-4 ResearchGate 그림 링크 잔존 확인. 그림 출처는 학술 논문의 주장 근거와 용도가 다를 수 있으므로 사진/도판 저작권·원출처 확인 전 단순 DOI 치환 금지.
+- [ ] 72개 약한 도메인 링크 및 47개 본문 직접 미인용 항목의 개별 결론은 **미완료**. 11-08 감사가 해당 집계를 다시 산출한 것은 아니므로 종전 수치를 최신 확정값으로 표시하지 않음.
+- [ ] 다음 안전 편집 차수: 원문 문장·참고문헌 번호·연구 주장 일치 검증 → 전체 WP 원본 artifact 백업 → 쓰기 금지 프리뷰 성공 → 최소 수정 → WP 재조회/공개 200/이미지·번호·게시상태 검증. 이 차수는 조건이 충족되지 않아 WP 변경 0건, AdSense 재신청 0건.
