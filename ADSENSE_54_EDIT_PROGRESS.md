@@ -150,3 +150,12 @@
 - [ ] Kew 기관 페이지 `https://www.kew.org/plants/giant-waterlily`는 이번 자동 접속에서 HTTP 403. 접근 제한은 원자료 오류나 링크 삭제 근거가 아니며, 관련 주장 직접 검증은 별도 브라우저/사람 확인 필요.
 - [ ] **쓰기 안전 조건 미충족:** 이 차수의 최신 전체 WordPress 원본 artifact 백업과 정확 문장/번호별 쓰기 금지 프리뷰 성공을 새로 확보하지 못함. 따라서 WordPress 변경·자동발행·승인 플래그·AdSense 신청 모두 0건. 기존 72개/47개는 신규 전수 재집계가 아니므로 확정 최신값으로 갱신하지 않음.
 - **개별 분류 진행:** ref-2는 '원논문 유지(분류학 주장에 한정)'로 기록, ref-4는 '현장 관찰 가치 확인/핵심 주장 근거 부적합 보류'로 기록. 같은 참고문헌이 복수 주장에 쓰이므로 출처 1건을 일괄 성공 처리하지 않음. 이번에 54개 전체 URL·모바일·정책 기술 회귀 검사를 재수행한 것은 아님. 최종 종료 조건 미충족.
+
+
+## 2026-11-11 자동 차수: 빅토리아수련 EN 공개 참고문헌 중복 및 주장 연결 확인 (읽기 전용)
+- [x] 선행 보고서 3개 및 최신 작업대장 확인. 비로그인 공개 WordPress REST `/wp-json/wp/v2/posts/775`를 재조회해 `publish`, `modified=2026-11-06T22:07:56`, 공개 URL `https://taxonguru.com/en/victoria-amazonica-giant-water-lily-facts/` 확인. 한국어 ID 141 API는 이번 접근에서 실패하여 한영 동시 검증은 미완료.
+- [x] **ID 775 ref-5와 ref-7은 정확히 동일한 Kew 2026 시연 URL** (`https://www.kew.org/about-us/press-media/waterlily-weigh-off-2026`); **ref-8과 ref-9도 동일한 Kew 식물 소개 URL** (`https://www.kew.org/plants/giant-waterlily`). 이는 번호가 붙은 참고문헌 9항목 중 서로 다른 URL이 최대 7개라는 뜻이며, 출처 오류나 삭제 허가를 뜻하지 않음. 인용 번호 보존 조건 때문에 검증 없이 병합 금지.
+- [x] **ID 775 ref-2 분류학 논문 오인용 위험 추가 확인:** 꽃의 10°C 발열·Cyclocephala 딱정벌레의 꽃가루 전달 및 Paxton 건축 관련 문단이 `[2]`를 인용하지만, DOI `10.3389/fpls.2022.883151`은 신종 `V. boliviana` 기술·분류학 원논문임. 각 생리·역사 주장에 해당 논문이 직접 근거를 제공하는지는 검증되지 않음. 기존 ref-2를 임의 제거하지 않고 주장별 1차 근거 검토 대상으로 유지.
+- [x] 최신 GitHub Actions 실행 `TaxonGuru AdSense Recovery v6.4.3` #303은 2026-11-10 10:35 KST 시작, `success`: https://github.com/Hwanss/taxon-guide-auto/actions/runs/42736808624 . **Recovery 성공은 이번 출처별 검증/전체 백업·프리뷰·54 URL 재감사 완료를 뜻하지 않음.**
+- [ ] 2026-11-11 전체 WP 원본의 새 artifact 백업 및 정확 문장/번호 일치 쓰기 금지 프리뷰 성공 증빙 없음. 따라서 WordPress 변경 0건, 참조 번호 병합 0건, 자동발행/사람 승인/AdSense 신청 0건. 재집계 전 72/47은 이전 기준값으로만 유지.
+- **개별 보류 기록:** EN 775 ref-5/7 동일 URL, ref-8/9 동일 URL → `유지(중복 확인, 번호 병합 보류)`; ref-2의 분류학 이외 생리·건축 주장 연결 → `사람/원논문 확인 필요`. 본 기록은 별도 참고문헌 전체 결론의 완료 처리로 계산하지 않음. 최종 종료 조건 미충족.
