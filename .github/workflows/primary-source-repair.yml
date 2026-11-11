@@ -22,8 +22,8 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          DUPLICATE_SOURCE_APPLY: 'false'
-          DUPLICATE_SOURCE_EXPECTED: '{}'
+          DUPLICATE_SOURCE_APPLY: 'true'
+          DUPLICATE_SOURCE_EXPECTED: '{"227":"2026-11-07T16:03:39","449":"2026-11-07T16:03:41","209":"2026-11-06T19:20:46","401":"2026-11-06T19:20:48"}'
         run: python adsense_duplicate_source_repair_20261111.py
       - name: Archive original WordPress articles, verified previews and result
         if: always()
