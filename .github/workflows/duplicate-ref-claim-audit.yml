@@ -1,0 +1,31 @@
+name: TaxonGuru Duplicate Reference Claim Review
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['DUPLICATE_REF_AUDIT_TRIGGER.md']
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests beautifulsoup4
+      - run: python -m py_compile adsense_duplicate_ref_claim_audit_20261111.py
+      - name: Read-only claim-specific duplicate bibliography audit
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+        run: python adsense_duplicate_ref_claim_audit_20261111.py
+      - name: Archive published source and citation contexts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: duplicate-reference-claim-audit-${{ github.run_number }}
+          path: audit_output/duplicate_ref_claim_review/
+          retention-days: 90
+          if-no-files-found: warn
