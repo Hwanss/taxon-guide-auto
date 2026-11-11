@@ -22,8 +22,8 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          RELATED_LINKS_APPLY: 'true'
-          RELATED_LINKS_EXPECTED: '{"137":"2026-11-06T19:02:41","24":"2026-11-06T19:02:31","787":"2026-11-06T19:02:42","864":"2026-11-06T19:02:33"}'
+          RELATED_LINKS_APPLY: 'false'
+          RELATED_LINKS_EXPECTED: '{}'
         run: python adsense_corpseflower_crosslinks_20261111.py
       - name: Preserve all original HTML and proposed changes
         if: always()
