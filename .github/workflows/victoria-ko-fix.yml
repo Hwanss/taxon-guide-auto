@@ -22,8 +22,8 @@ jobs:
           WP_SITE_URL: ${{ vars.WP_SITE_URL }}
           WP_USER: ${{ secrets.WP_USER }}
           WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
-          VICTORIA_KO_APPLY: 'true'
-          VICTORIA_KO_EXPECTED_MODIFIED: '2026-11-06T22:07:54'
+          VICTORIA_KO_APPLY: 'false'
+          VICTORIA_KO_EXPECTED_MODIFIED: ''
         run: python adsense_victoria_ko_fix_20261111.py
       - name: Store original and correction for independent review
         if: always()
