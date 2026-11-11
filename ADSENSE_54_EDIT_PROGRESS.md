@@ -171,3 +171,15 @@
 - [ ] 재신청 **미실행** 및 자동발행·독립 사람 검수 서명 변경 없음. **기술 검사 통과를 애드센스 승인과 혼동하지 않음.**
 - **총괄 보고:** [ADSENSE_FINAL_PASS_20261111.md](https://github.com/Hwanss/taxon-guide-auto/blob/main/ADSENSE_FINAL_PASS_20261111.md).
 
+
+
+## 2026-11-11 자동 실행 추가 차수 — 중복 참고 URL 4슬롯 실수정 및 재검증
+
+- 사전 근거 감사: [GitHub Actions #42940893421](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42940893421). 실제 공개 WordPress 참고문헌 번호와 연결되는 본문 문장을 교차검토함. 단순 URL 중복만으로 참고문헌을 지우거나 번호를 병합하지 않음.
+- 푸야 라이몬디 한국어 227 / 영어 449의 **ref-5**: Frontiers 2024 종합 리뷰(ref-2와 중복)를 직접 현장 관찰에 해당하는 Rees & Roe (1980) `https://doi.org/10.1139/b80-157`로 교체. 새의 가시 걸림 및 잠재적 영양 공급은 **가설**이지 식물의 육식성이 실증됐다는 주장은 아님.
+- 앵무조개 한국어 209 / 영어 401의 **ref-4**: NOAA 일반 소개(ref-5와 중복)를 야생 표지·재포획에 의한 성숙/수명 원논문 Dunstan et al. (2011) `https://doi.org/10.1371/journal.pone.0016312`로 교체. 원논문의 약 15.5년 성숙 추정·20년 초과 수명 근거와 문장 문맥을 맞춤. 기존 ref-5는 NOAA 기관 자료로 유지.
+- [쓰기 금지 사전 검사/4건 전체 백업](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42941108324) 성공 후, [실제 WordPress 수정·4/4 재조회·4/4 공개 200·원본 artifact 보관](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42941199593) 완료. 수정 후 workflow `.github/workflows/primary-source-repair.yml`은 다시 `DUPLICATE_SOURCE_APPLY=false`로 복구.
+- [수정 후 54건 독립 품질 감사](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42941317652): **참고문헌 동일 URL 중복 글 0건 / 중복 슬롯 0개**로 감소, 번호 본문 미인용 0건, 존재하지 않는 번호 인용 0건, 약한 도메인 출처 68개 / 50개 글로 유지 (이 68개가 모두 잘못됐다는 뜻 아님).
+- [수정 후 54건 기술 및 27쌍 hreflang 검사](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42941322886): 공개 54/54 정상, 한국어 27/영어 27, 27/27쌍 정상, Canonical 오류 0, 총 이미지 108개, 번호 참고문헌 450개, robots.txt/ads.txt/sitemap/정책 주요 8개 URL HTTP 200, 내부 URL 6개 검사 중 깨진 링크 0개. 이것은 Google의 고유한 가치 심사 통과 판정이 아님.
+- **여전히 미완료**: 남은 약한 출처 68개의 개별 주장 적합성 판정/정리, 독자 관점의 독창적 분석과 이미지 108개 라이선스 육안 검증, Google Search Console 색인 및 애드센스 관리자 세부 반려 사유 확인. 재신청·자동 새 게시/승인 서명/유료 API 과금 변경 **0건**. 이 상태에서 재신청 완료라고 기록하지 말 것.
+
