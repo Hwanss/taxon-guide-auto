@@ -1,0 +1,35 @@
+name: TaxonGuru Victoria Korean Evidence Fix
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['VICTORIA_KO_FIX_TRIGGER.md']
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_victoria_ko_fix_20261111.py
+      - name: Review original and proposed references
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          VICTORIA_KO_APPLY: 'false'
+          VICTORIA_KO_EXPECTED_MODIFIED: ''
+        run: python adsense_victoria_ko_fix_20261111.py
+      - name: Store original and correction for independent review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: victoria-ko-evidence-${{ github.run_number }}
+          path: audit_output/victoria_ko_20261111/
+          retention-days: 90
+          if-no-files-found: warn
