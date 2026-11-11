@@ -1,0 +1,35 @@
+name: TaxonGuru Guarded Primary Evidence Source Repair
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['PRIMARY_SOURCE_REPAIR_TRIGGER.md']
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests beautifulsoup4
+      - run: python -m py_compile adsense_duplicate_source_repair_20261111.py
+      - name: Backup and validate four claim-matched bibliography replacements
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          DUPLICATE_SOURCE_APPLY: 'false'
+          DUPLICATE_SOURCE_EXPECTED: '{}'
+        run: python adsense_duplicate_source_repair_20261111.py
+      - name: Archive original WordPress articles, verified previews and result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: primary-source-repair-${{ github.run_number }}
+          path: audit_output/duplicate_source_repair/
+          retention-days: 90
+          if-no-files-found: warn
