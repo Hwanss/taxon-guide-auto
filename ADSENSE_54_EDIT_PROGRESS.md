@@ -159,3 +159,15 @@
 - [x] 최신 GitHub Actions 실행 `TaxonGuru AdSense Recovery v6.4.3` #303은 2026-11-10 10:35 KST 시작, `success`: https://github.com/Hwanss/taxon-guide-auto/actions/runs/42736808624 . **Recovery 성공은 이번 출처별 검증/전체 백업·프리뷰·54 URL 재감사 완료를 뜻하지 않음.**
 - [ ] 2026-11-11 전체 WP 원본의 새 artifact 백업 및 정확 문장/번호 일치 쓰기 금지 프리뷰 성공 증빙 없음. 따라서 WordPress 변경 0건, 참조 번호 병합 0건, 자동발행/사람 승인/AdSense 신청 0건. 재집계 전 72/47은 이전 기준값으로만 유지.
 - **개별 보류 기록:** EN 775 ref-5/7 동일 URL, ref-8/9 동일 URL → `유지(중복 확인, 번호 병합 보류)`; ref-2의 분류학 이외 생리·건축 주장 연결 → `사람/원논문 확인 필요`. 본 기록은 별도 참고문헌 전체 결론의 완료 처리로 계산하지 않음. 최종 종료 조건 미충족.
+
+## 2026-11-11 수동 요청 후 실제 반영/전수 재검증
+
+- [x] 기존 애드센스 개선기록을 다시 확인하고 영어 빅토리아수련 ID 775를 직접 수정·원문 백업·WordPress 공개 재검증: [실제 수정](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42936441876).
+- [x] 한국어 빅토리아수련 ID 141도 동일한 보수적 원본 보호 절차로 과학적 주장 연결 13개 오인용 교정, 참고문헌 5개 원자료 교체, 발열 측정 수치 검토: [실제 수정](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42937558516).
+- [x] 라플레시아/타이탄 아룸 한영 4건(ID 137/24/787/864) 실제 관련글 연결·비교 설명 반영: [실제 수정](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42938232069). 수정 전 4건 백업 및 4/4 공개 재검증. 모든 일회성 작업은 적용 후 preview-only 복구.
+- [x] 변경 후 [54건·27언어쌍 전수 검사](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42938423064) 완료: 공개 54/54 200, hreflang 27/27 정상, 본문 내부 고유 링크 6개, 깨진 내부 링크 0, 정책/사이트맵/ads.txt 경로 8/8 정상.
+- [x] [독립 내용 감사](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42938430043) 재집계: 약한 도메인 참고 링크 **68개 / 50개 공개 글**, 동일 URL 참고문헌 중복 글 **4건 / 중복 슬롯 4개**, 번호 있는 참고문헌 본문 미인용 **0건**. 과거 '47개 미인용'은 정규식이 문자형 [1, 2]를 읽지 못한 과대집계였으므로 앞으로 최신 진단 0을 사용. **개별 문장-출처 적합성 전면 승인과 무관**.
+- [ ] 잔여 출처 68개 분류·핵심 주장 직접 검증, 푸야 라이몬디 227/449 및 앵무조개 209/401 참고문헌 중복·근거 대조, 108개 이미지 라이선스/실제 Search Console 색인/AdSense 관리자 상태와 사람의 독창성 검토는 **미완료**.
+- [ ] 재신청 **미실행** 및 자동발행·독립 사람 검수 서명 변경 없음. **기술 검사 통과를 애드센스 승인과 혼동하지 않음.**
+- **총괄 보고:** [ADSENSE_FINAL_PASS_20261111.md](https://github.com/Hwanss/taxon-guide-auto/blob/main/ADSENSE_FINAL_PASS_20261111.md).
+
