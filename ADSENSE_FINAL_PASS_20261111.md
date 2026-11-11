@@ -40,3 +40,13 @@
 - [수정 후 54건 기술 및 27쌍 hreflang 검사](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42941322886): 공개 54/54 정상, 한국어 27/영어 27, 27/27쌍 정상, Canonical 오류 0, 총 이미지 108개, 번호 참고문헌 450개, robots.txt/ads.txt/sitemap/정책 주요 8개 URL HTTP 200, 내부 URL 6개 검사 중 깨진 링크 0개. 이것은 Google의 고유한 가치 심사 통과 판정이 아님.
 - **여전히 미완료**: 남은 약한 출처 68개의 개별 주장 적합성 판정/정리, 독자 관점의 독창적 분석과 이미지 108개 라이선스 육안 검증, Google Search Console 색인 및 애드센스 관리자 세부 반려 사유 확인. 재신청·자동 새 게시/승인 서명/유료 API 과금 변경 **0건**. 이 상태에서 재신청 완료라고 기록하지 말 것.
 
+
+## 2026-11-11 OpenSEO 독립 사이트 크롤링 및 Search Console 연결 상태
+
+- OpenSEO 전용 프로젝트: https://app.openseo.so/p/b23abd92-03bc-4c4a-a969-4958c019f6b9
+- 무료 JavaScript 비렌더링/비Lighthouse 사이트 크롤링: https://app.openseo.so/p/b23abd92-03bc-4c4a-a969-4958c019f6b9/audit?auditId=b500fb68-c4e2-4bd6-8c14-86f06f5cdb4b
+- **크롤러 완료:** 50페이지 조사, HTTP 200 **45**, 301 **4**, 429 **1** (영어 라플레시아 `/en/rafflesia-arnoldii-worlds-largest-single-flower/`). 429는 해당 OpenSEO 자동 수집기에 한 번 관측된 응답이며 Googlebot 차단·방문자 오류·AdSense 반려 원인이라고 단정할 수 없음. 기존 GitHub Actions 54/54 HTTP 200 검사는 다른 시간·수집자로서 결과가 다르므로 캐시/요청 빈도/UA 차이 등 근거 추가 필요.
+- 크롤러 경고: 누락된 메타 설명 **6** (운영자 작성자 페이지 1 + 영어 카테고리 5), 중복 메타 설명 **3** (홈 및 /page/2/ /page/6/), 단문 분류 **1** (/contact-and-corrections/). 단문 판정은 정책 페이지가 부실하다는 증거가 아님. 참고 정보: title too long **17**, meta too long **11**, meta too short **10**, author noindex **1** (설정 의도 확인 전 수정 금지).
+- OpenSEO 검색 성능 조회 결과: Search Console 연결 `not_connected`; OpenSEO에서 보이는 Google 계정 및 GSC 속성 **0개**. Google이 실제 색인한 URL 수, 제외 이유, 자연 검색 클릭/노출은 **현재 확인 불가**. 사용자 Google 인증 필요: https://app.openseo.so/p/b23abd92-03bc-4c4a-a969-4958c019f6b9/search-performance
+- **우선 판단:** (A) Search Console 인증 후 대표 글 10개 URL 색인 상태/이유를 읽기 전용으로 검사, (B) 429 반복·UA/시간대별 재현 여부만 추가 점검, (C) 사이트 전체 사용자 경험/독창성·출처 적합성을 최우선으로 유지, (D) 메타 길이와 아카이브 설명은 검증 가능한 범위의 안전 변경만 실시. Google 접근을 위해 사이트 보안 설정을 무조건 완화하지 말고, 억지로 50개 경고를 0으로 만들기 위한 SEO 전면 개조를 피할 것.
+- OpenSEO 프로젝트 생성, 사이트 크롤링, Search Console 확인에는 **추가 연구 크레딧을 쓰지 않았음**. 유료 API·AI 추적·정기 구독 설정 없음.
