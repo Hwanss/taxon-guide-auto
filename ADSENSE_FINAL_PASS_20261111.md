@@ -50,3 +50,13 @@
 - OpenSEO 검색 성능 조회 결과: Search Console 연결 `not_connected`; OpenSEO에서 보이는 Google 계정 및 GSC 속성 **0개**. Google이 실제 색인한 URL 수, 제외 이유, 자연 검색 클릭/노출은 **현재 확인 불가**. 사용자 Google 인증 필요: https://app.openseo.so/p/b23abd92-03bc-4c4a-a969-4958c019f6b9/search-performance
 - **우선 판단:** (A) Search Console 인증 후 대표 글 10개 URL 색인 상태/이유를 읽기 전용으로 검사, (B) 429 반복·UA/시간대별 재현 여부만 추가 점검, (C) 사이트 전체 사용자 경험/독창성·출처 적합성을 최우선으로 유지, (D) 메타 길이와 아카이브 설명은 검증 가능한 범위의 안전 변경만 실시. Google 접근을 위해 사이트 보안 설정을 무조건 완화하지 말고, 억지로 50개 경고를 0으로 만들기 위한 SEO 전면 개조를 피할 것.
 - OpenSEO 프로젝트 생성, 사이트 크롤링, Search Console 확인에는 **추가 연구 크레딧을 쓰지 않았음**. 유료 API·AI 추적·정기 구독 설정 없음.
+
+
+## 2026-11-11 실제 Google Search Console 연결 및 공개 54건 전수 색인 판정
+
+- OpenSEO 프로젝트 `b23abd92-03bc-4c4a-a969-4958c019f6b9`에서 Google Search Console 속성 `https://taxonguru.com/`을 직접 연결했음을 API로 확인. 연결 Google 계정에 해당 속성 소유자 권한이 있음. GSC API 확인은 무료/읽기 전용.
+- 2026-10-12~2026-11-08 Search Analytics **완료된 28일** 기준 페이지 행 76개, 클릭 합계 **11**, 노출 합계 **822**, 클릭 발생 페이지 **10개**. 과거 초안, 카테고리, 정책 페이지 URL이 실적에 포함되므로 76개를 현시점 공개/색인 글 개수로 오해하지 말 것. 검색 실적은 AdSense 정책 승인 여부와 별개.
+- 실제 WordPress 인증 REST의 [읽기 전용 현재 공개 상태 비교](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42974335204): `colossal-squid-giant-cephalopod` 한국어는 현재 초안(ID 190)이고 공개 주소 HTTP 404; 해당 영어 공개 슬러그는 404이면서 API 검색에 공개/현 초안 자료 없음. `hydnellum-peckii-devils-tooth` 한국어(ID 260)와 `bleeding-tooth-fungus-hydnellum-peckii-guide` 영어(ID 535)는 모두 현재 초안이고 실제 공개 URL HTTP 404. 이 중 hydnellum 2 URL은 GSC에서 마지막 크롤일 11/2~3 기준 **색인 PASS(과거 정보)**로 보임. 반대로 colossal squid 2 URL은 GSC에서 11/9 **NOT_FOUND 404**로 반영됨. **절대 자동으로 초안을 재공개하지 말 것.** 실제 실험 User-Agent의 `Googlebot` 문자열 요청은 403이었으나 이는 인증된 실제 Googlebot이 아니며 실제 Google 차단 증거로 간주하지 말 것. 최근 실제 GSC가 Googlebot MOBILE 정상 색인 53건을 보고하므로 사이트 보안을 임의로 약화시키지 말 것.
+- [WordPress 공개 54개 URL 목록 추출 증거](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42974552411): 54개 모두 `status=publish`와 URL을 실제 확인. 이 목록 **54개 전체**를 OpenSEO `inspect_urls`로 10개 이하 단위로 전수 조회한 결과: **53개 PASS, 1개 NEUTRAL(“Google에는 아직 알려지지 않은 URL입니다”), 0개 canonical 불일치**. PASS 53건은 Google의 마지막 저장 색인 상태이며 현재 실시간 크롤링을 뜻하지 않음; 그래도 대규모 미색인 문제는 발견되지 않음. 예외 공개 페이지 `https://taxonguru.com/corpse-flower-giant-stinker/` (Titan arum 한국어). GitHub QA에서는 공개 URL HTTP 200이며 GSC는 아직 해당 URL의 색인/크롤 기록이 없다고 표시. 다음에는 실제 sitemap 및 관련 내부 링크 노출/정규 URL/noindex 여부 검토; 필요한 경우 사용자가 Search Console에서 URL 검사→색인 생성 요청을 수동 실행할 수 있음.
+- [Google 공식 URL Inspection 문서](https://support.google.com/webmasters/answer/9012289/): URL 검사 API/일반 기본 결과는 **Google에 저장된 마지막 색인 상태**이며 실시간 테스트와 다르므로 공개 초안/404 및 최신 사이트 수정과의 시차를 정상적으로 해석해야 함.
+- Google AdSense 관리자 내 구체적 반려 사유/정책 센터 화면과 Search Console **수동 조치** 보고서는 이 단계에서 조회하지 않았으며, **53/54 색인 성공도 광고 승인 보장은 아님**. 현재 최우선 과제는 과학 주장별 남은 출처 68건 개별 검수, 사용자 관점의 독창성, 108개 이미지 이용 근거 확인, 품질 미달 초안 비공개 유지.
