@@ -1,0 +1,35 @@
+name: TaxonGuru Correlation Crosslinks (Curated 4)
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['CORPSEFLOWER_LINKS_TRIGGER.md']
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - run: python -m py_compile adsense_corpseflower_crosslinks_20261111.py
+      - name: Backup, check, and preview four evidence-based related links
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          RELATED_LINKS_APPLY: 'false'
+          RELATED_LINKS_EXPECTED: '{}'
+        run: python adsense_corpseflower_crosslinks_20261111.py
+      - name: Preserve all original HTML and proposed changes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxonguru-curated-related-links-${{ github.run_number }}
+          path: audit_output/corpse_flower_crosslinks/
+          retention-days: 90
+          if-no-files-found: warn
