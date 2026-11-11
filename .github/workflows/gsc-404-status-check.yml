@@ -1,0 +1,31 @@
+name: TaxonGuru Read-only GSC 404 Reconciliation
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['GSC_404_STATUS_TRIGGER.md']
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests
+      - name: Read-only live and authenticated status comparison
+        env:
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+        run: python adsense_gsc_live_status_check_20261111.py
+      - name: Save evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gsc-404-live-status-${{ github.run_number }}
+          path: audit_output/gsc_status_check/
+          retention-days: 90
+          if-no-files-found: warn
