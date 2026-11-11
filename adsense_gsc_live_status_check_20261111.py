@@ -38,5 +38,15 @@ def main():
  report={"audit_time_utc":datetime.now(timezone.utc).isoformat(),"no_write":True,"results":out}
  Path("audit_output/gsc_status_check").mkdir(parents=True,exist_ok=True)
  Path("audit_output/gsc_status_check/current_public_and_post_status.json").write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding="utf8")
+ # Enumerate current public posts for full Search Console indexing comparison.
+ try:
+  all_posts=s.get(SITE+"/wp-json/wp/v2/posts",params={"per_page":100,"status":"publish","_fields":"id,link,slug,status"},timeout=45)
+  all_posts.raise_for_status()
+  published=[{"id":v.get("id"),"url":v.get("link"),"slug":v.get("slug")} for v in all_posts.json()]
+  report["public_wordpress_count"]=len(published)
+  report["published_urls"]=published
+  print("PUBLISHED_URL_LIST="+json.dumps(published,ensure_ascii=False),flush=True)
+ except requests.RequestException as e:
+  report["publication_list_error"]=type(e).__name__
  print("GSC_STATUS_COMPARISON="+json.dumps(report,ensure_ascii=False),flush=True)
 if __name__=="__main__":main()
