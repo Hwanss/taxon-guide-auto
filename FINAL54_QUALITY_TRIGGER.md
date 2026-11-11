@@ -4,3 +4,5 @@
 2026-11-06 independent review: reciprocal Korean-English 27-pair hreflang, canonicals, metadata, H1 on all 54 public pages. Read only.
 
 2026-11-11 final regression after Victoria EN/KR citation fixes and four thematic Rafflesia/titan arum related links. Read-only full 54 posts, 27 bilingual pairs, source URL duplicate/citation structure. Never publish.
+
+2026-11-11 reverify all 54 publicly visible articles and 27 bilingual pairs after four primary-paper reference repairs, including internal linking, alt counts and original references. READ-ONLY.
