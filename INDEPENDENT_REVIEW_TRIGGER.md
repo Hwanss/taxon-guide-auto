@@ -4,3 +4,5 @@
 2026-11-07: re-audit reference quality after 12 original-source replacements in six published bilingual articles; read-only.
 
 2026-11-11: rerun full 54-post independent audit with fixed numbered-citation counting, repeated source URL detection, and broken citation anchor diagnostics. Read-only; do not change WordPress or AdSense.
+
+2026-11-11 final regression after Victoria EN/KR citation fixes and four thematic Rafflesia/titan arum related links. Read-only full 54 posts, 27 bilingual pairs, source URL duplicate/citation structure. Never publish.
