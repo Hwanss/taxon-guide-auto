@@ -202,3 +202,12 @@
 - 기존 OpenSEO 무료 감사 b500fb68-c4e2-4bd6-8c14-86f06f5cdb4b 재조회: completed 50페이지, 메타 설명 누락 6/중복 3, 크롤러 429 1, 정책 페이지 단문 1로 이전과 동일. https://app.openseo.so/p/b23abd92-03bc-4c4a-a969-4958c019f6b9/audit?auditId=b500fb68-c4e2-4bd6-8c14-86f06f5cdb4b . 429만으로 Googlebot 차단을 단정하지 않음.
 - 11/11 GitHub Actions 42941317652의 artifact 존재 확인. 이것은 **오늘의 수정 전 전체 백업/프리뷰가 아님**. 오늘 새 Actions 백업·정확 일치 preview 미확보로 WordPress 수정 0건, GitHub Actions 새 실행 0건. 초안 공개·자동발행·승인 서명·유료 API·AdSense 재신청 모두 0건.
 - 다음 차수: 원논문/기관 자료와 주장 직접 대조 후 원본+메타데이터 artifact 백업과 정확 일치 preview 성공시에만 최소 수정. GSC 저장 미인지 URL은 sitemap/canonical/noindex/내부 링크 및 시차 검토. 68개 개별 판정·108개 이미지 권리·AdSense 관리자 세부 반려 사유 미완료. **재신청 보류.**
+
+
+## 2026-11-14 자동 점검 — 기존 무료 크롤링 경고별 조치 분류 (읽기 전용)
+
+- 최신 main의 `ADSENSE_FINAL_PASS_20261111.md`, 본 작업대장, `ADSENSE_INDEPENDENT_DEEP_REVIEW_20261106.md`, `ADSENSE_REMEDIATION_20261107.md`를 확인. 11/11 최종 **54 공개 / 27 언어쌍 / 54 URL 200 / 이미지 108 / 참고문헌 450 / 약한 도메인 68(50글) / 중복 0 / 미인용 0 / GSC 저장 색인 53 PASS·1 미인지**를 마지막 전수 실측으로 유지. 오늘의 새 전수 실측이라고 표기하지 않음.
+- OpenSEO 무료 기존 감사 `b500fb68-c4e2-4bd6-8c14-86f06f5cdb4b`의 완료 상태(2026-11-11 02:21:02 UTC, 50/50 페이지)와 개별 issue 행을 다시 조회: https://app.openseo.so/p/b23abd92-03bc-4c4a-a969-4958c019f6b9/audit?auditId=b500fb68-c4e2-4bd6-8c14-86f06f5cdb4b . 새 크롤링 아님.
+- **SEO 경고 11행의 개별 처리 판단:** `missing-meta-description` 6개 중 작성자 `/author/kjhtimegmail-com/` 1개는 기존 noindex 의도 확인 전 **유지/검토 보류**; 영어 카테고리 `/category/botany-2/`, `/category/evolution-mysteries-2/`, `/category/extreme-survivors-2/`, `/category/paleontology-2/`, `/category/size-lab-2/` 5개는 **페이지별 실제 내용·SEO 필드 대조 및 백업/프리뷰 후에만 수정 후보**. `duplicate-meta-description` 3개는 홈 `/`, `/page/2/`, `/page/6/`에 동일 설명이 나오는 아카이브 페이지네이션 템플릿 문제 후보: 템플릿/SEO 플러그인 설정 검증 전 수동 문구 대량 변경 금지. `rate-limited-page` 1개는 영문 라플레시아에서 수집기 429 1회 관측: 보안 우회/Googlebot 차단 판정 금지. `thin-content` 1개는 `/contact-and-corrections/` 101단어의 연락·정정 정책으로, 글 길이만을 이유로 분량 늘리기 금지.
+- 실제 공개 WordPress REST/방문자 페이지의 오늘 재조회는 실행 환경에서 네트워크/DNS 및 웹 열기 실패로 **미완료**. 따라서 오늘 공개 URL 200, 게시 상태, GSC 현재 색인, 변경 여부를 새로 검증했다고 주장하지 않음. 사이트 장애의 증거도 아님. WordPress 수정 **0건**, 새 Actions 백업/쓰기 금지 프리뷰 **0건**, 새 54건 재감사 **0건**. 이번 차수는 새 원논문 주장 일치 확인을 끝내지 못해 본문 편집 안전 게이트 미충족.
+- 변경 없는 이유: 전체 원본+메타데이터 Actions artifact 백업, 정확 일치 preview, WordPress 인증/공개 재조회 확보 실패. 기존 11/11 수정 재실행하지 않음. 비공개 글 공개·사람 승인 서명·자동발행·유료 API·AdSense 재신청 모두 수행하지 않음. **재신청 보류**. 다음 차수는 실제 WP 접근 회복 후 우선 출처 68건의 개별 주장-원자료 판정 및 이미지 이용허락 증빙을 작은 배치로 처리.
