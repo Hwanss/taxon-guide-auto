@@ -260,3 +260,14 @@
 - 기존 [Actions #42941322886](https://github.com/Hwanss/taxon-guide-auto/actions/runs/42941322886) artifact API 재조회: `taxonguru-bilingual-seo-4` (artifact 13819604772), `taxonguru-final54-quality-4` (artifact 13819554971), 둘 다 2027-02-09 만료 예정·현재 expired=false. **과거 검사 artifact 확인일 뿐 이번 실행의 신규 백업 아님**.
 - OpenSEO 기존 무료 감사 `b500fb68-c4e2-4bd6-8c14-86f06f5cdb4b` 상태/이슈 API 재조회: 2026-11-11 완료 50/50페이지, 경고 메타 누락 6, 중복 3, 수집기 429 1, 문의 페이지 단문 1. 새 감사 미시작, 최신 실시간 SEO 전수 측정 아님. 메타 누락 중 작성자 noindex 페이지와 영어 카테고리 5개를 구분해야 함. 429를 Googlebot 차단으로 해석하지 않음.
 - 이번 차수 **WP 변경 0 / 신규 Actions 백업 0 / 신규 프리뷰 0 / 신규 54건 전수 감사 0 / 새로운 출처 개별 최종 판정 0**. 전날 대비 공개 본문에서 표현이 남아 있다는 점을 오늘 크롤링으로 재확인했고 기존 QA artifact가 만료되지 않았음을 확인. 인증 접근과 백업/프리뷰 확보 전 쓰기 금지. 68건 출처 개별 판정, 이미지 라이선스, 독창성 및 AdSense 관리자 반려 사유 미완료. 재신청 보류. 유료 API, 초안 공개, 자동발행, 승인 플래그 변경, AdSense 신청 없음.
+
+
+## 2026-11-20 자동 점검 — 타이탄 아룸 사진 2개 원본 라이선스 개별 확인 (읽기 전용)
+
+- 최신 main 네 기준 문서 및 11/19 작업대장 확인. 최신 커밋 확인 기준 `8d7fb8ca76d4598dfe0c0a3ecc1f7ff146f01179`. 11/11 전수 감사의 54 공개글/27쌍/108 이미지/450 참고문헌/약한 도메인 68개(50글)/GSC 53 PASS·1 미인지는 오늘 재측정값이 아님.
+- 11/20 익명 방문자 https://taxonguru.com/corpse-flower-giant-stinker/ 열람 성공(웹 수집 today 표기). 본문에 두 개의 Wikimedia 사진과 저자·CC BY-SA 4.0·원본 링크가 표시됨. WordPress REST /wp-json/wp/v2/posts/24는 도구 접근 실패. 공개 HTML 수집만으로 수정시각/HTTP 상태 코드/원본 메타데이터 확인 완료라고 주장하지 않음.
+- **사진 1 원본 확인:** https://commons.wikimedia.org/wiki/File:2021-11-26_213217_Hannover_Berggarten_Amorphophallus_titanum.jpg — Tim Rademacher 본인 촬영, CC BY-SA 4.0, 원본 페이지에 저작자·라이선스·저작자표시 조건 확인. 공개 글의 'Tim Rademacher · Wikimedia Commons · CC BY-SA 4.0 · 원본 파일' 표기와 일치. **라이선스/저작자표시 출처 확인 1건**, 사진 자체의 변형 유무 및 변형 고지 적정성은 원본과 픽셀 비교 미실시로 별도 보류.
+- **사진 2 원본 확인:** https://commons.wikimedia.org/wiki/File:20210605_Hortus_botanicus_Leiden_-_Amorphophallus_titanum.jpg — Rudolphous 본인 촬영, CC BY-SA 4.0, 저작자·라이선스 확인. 공개 글의 'Rudolphous · Wikimedia Commons · CC BY-SA 4.0 · 원본 파일' 표기와 일치. **라이선스/저작자표시 출처 확인 1건**, 이미지 수정·재배포 조건 준수 최종 판정은 원본 대비 픽셀 비교 및 실제 미디어 메타 확인 전까지 보류.
+- 이번 배치는 **2개 사진의 원본 파일 페이지·명시적 저작권 라이선스·공개 저작자표시를 새로 대조**한 실질적인 개별 검증. 108개 전체가 검증됐다는 뜻은 아님. AI 대표 이미지는 사진 라이선스 확인 2건에 포함하지 않음.
+- 과거 Actions #42941322886 artifact 2개 expired=false(2027-02-09 만료 예정) 확인; 신규 편집 백업이 아님. OpenSEO 무료 감사 b500fb68-c4e2-4bd6-8c14-86f06f5cdb4b 는 11/11 완료 50/50 상태 재확인, 새 감사 미시작.
+- 인증 REST/전체 원본+메타데이터 새 artifact 백업/정확 일치 preview 부재로 **WordPress 변경 0건, 신규 Actions 백업 0건, 신규 프리뷰 0건**. 기존 과학적 표현 위험 후보는 여전히 보류. 새 발행·초안 공개·유료 API·AdSense 재신청 없음. **재신청 보류**.
