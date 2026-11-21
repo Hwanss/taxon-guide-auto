@@ -281,3 +281,11 @@
 - 기존 GitHub Actions https://github.com/Hwanss/taxon-guide-auto/actions/runs/42941322886 artifact 2개(taxonguru-bilingual-seo-4 ID 13819604772, taxonguru-final54-quality-4 ID 13819554971)는 expired=false, 2027-02-09 만료 예정 확인. 오늘의 신규 편집 백업이 아님.
 - 기존 OpenSEO 무료 감사 b500fb68-c4e2-4bd6-8c14-86f06f5cdb4b 완료 50/50 재확인. 기존 경고: 메타 설명 누락 6, 중복 3, 수집기 429 1, 문의 페이지 단문 1. 새 감사 시작하지 않았으며 Googlebot 차단 또는 AdSense 위반으로 단정하지 않음.
 - **WordPress 실제 수정 0건, 신규 백업 0건, 정확 일치 쓰기 금지 프리뷰 0건, 신규 출처 최종 판정 0건.** 안전 편집 조건 불충족으로 보류. 비공개 글 공개, 자동 발행, 유료 API, AdSense 재신청 없음. 출처 68건 개별 결론·이미지 이용허락 전수·AdSense 관리자 세부 사유 미완료로 재신청 보류.
+
+
+## 2026-11-22 자동 점검 — GSC 미인지 URL 재조회 및 편집 접근 경로 진단
+
+- main 기준 보고서 4개와 11/21 기록 확인. 최근 커밋 619ec7952b493a2e8870990267a0ce9182ac6f4e. 11/11 전수 기준 54 공개/27쌍/108 이미지/450 참고문헌/68 약한 출처는 신규 전수 측정 아님.
+- OpenSEO 무료 URL Inspection으로 https://taxonguru.com/corpse-flower-giant-stinker/ 를 오늘 실제 재조회: NEUTRAL, URL is unknown to Google, robots/indexing/fetch/mobile 모두 unspecified. 11/11 미인지 상태와 동일. 저장 색인 결과로 실시간 크롤링 아님. https://search.google.com/search-console/inspect?resource_id=https://taxonguru.com/&id=ltfh-wel_hdGeybZxnkohg&utm_medium=link&utm_source=api
+- 공개 방문자 본문 오늘 크롤링 열람 성공, 기존 두 문장 위험 후보 잔존. 익명 REST /wp-json/wp/v2/posts/24 접근 불가. 추가 진단: WordPress.com 연결 계정의 taxonguru.com 검색 결과 편집 가능 사이트 0개. 이는 기존 서버의 application password 또는 Actions 인증 실패를 입증하지 않으며 해당 연결 경로로 편집할 수 없다는 근거임.
+- 기존 Actions #42941322886 artifact 2개 expired=false 재확인. 신규 백업이나 프리뷰가 아님. 최신 전체 Actions 목록/로그 신규 확인은 미완료. WP 변경 0, 신규 백업/프리뷰 0, 새 출처 판정 0. 안전 게이트 유지. AdSense 관리자 미확인, 재신청 보류. 유료 분석/자동발행/초안 공개 없음.
