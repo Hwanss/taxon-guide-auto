@@ -1,0 +1,35 @@
+name: TaxonGuru Titan Arum Claim Correction Preview
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['TITAN_CLAIM_PREVIEW_TRIGGER.md']
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install requests beautifulsoup4
+      - run: python -m py_compile titan_claim_scope_repair_20261123.py
+      - name: Backup authenticated original and preview exact correction without writing
+        env:
+          WP_SITE_URL: ${{ vars.WP_SITE_URL }}
+          WP_USER: ${{ secrets.WP_USER }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          TITAN_CLAIM_APPLY: 'false'
+          TITAN_EXPECTED: '{}'
+        run: python titan_claim_scope_repair_20261123.py
+      - name: Archive original and guarded preview
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: titan-claim-preview-${{ github.run_number }}
+          path: audit_output/titan_claim/
+          retention-days: 90
+          if-no-files-found: warn
