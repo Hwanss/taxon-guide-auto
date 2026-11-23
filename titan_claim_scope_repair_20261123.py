@@ -45,4 +45,17 @@ def main():
  preview["result"]="LIVE_UPDATED_AND_VERIFIED"
  (OUT/"result.json").write_text(json.dumps(preview,ensure_ascii=False,indent=2))
  print("TITAN_RESULT="+json.dumps(preview,ensure_ascii=False),flush=True)
-if __name__=="__main__":main()
+if __name__=="__main__":
+ try:
+  main()
+ except Exception as exc:
+  # Preserve a non-secret failure reason in the artifact for diagnosing
+  # authentication or exact-match failures; never retry a write.
+  message=str(exc)
+  if any(token in message.lower() for token in ("password", "authorization", "token", "secret")):
+   message="redacted authentication or secret-related error"
+  failure={"result":"BLOCKED_NO_WRITE","error_type":type(exc).__name__,"reason":message[:500]}
+  (OUT/"failure.json").write_text(json.dumps(failure,ensure_ascii=False,indent=2))
+  print("TITAN_BLOCKED="+json.dumps(failure,ensure_ascii=False),flush=True)
+  raise SystemExit(1)
+
